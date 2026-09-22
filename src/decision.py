@@ -49,6 +49,14 @@ WEIGHTS = {
 
 BOOK_SOURCED = {"book_imbalance", "wall_ahead", "wall_pulled", "iceberg", "ofi"}
 
+# Features whose edge has been MEASURED out-of-sample, not assumed.
+# Measured on 200k live observations (BTCUSDT, 30s horizon):
+#   book_imbalance  52.9% lower bound, 53.9% out-of-sample, rising
+#                   monotonically with strength to 57.6% when |imb| > 0.8
+#   everything else 49-51%, i.e. indistinguishable from a coin flip
+# Update this set from the /learn report as evidence accumulates.
+CONFIRMED = {"book_imbalance"}
+
 
 class Observation(dict):
     def __init__(self, name, side, weight, detail, source="tape"):
@@ -150,7 +158,7 @@ def read(bars, i, ctx=None):
     return obs
 
 
-def decide(obs, threshold=0.9, conflict_ratio=0.55):
+def decide(obs, threshold=0.9, conflict_ratio=0.55, require_confirmed=True):
     """Weigh observations into a decision, and explain it.
 
     Returns dict with: action (-1/0/+1), score, confidence, reasons, blocked_by.
@@ -172,7 +180,21 @@ def decide(obs, threshold=0.9, conflict_ratio=0.55):
     has_book = any(o["source"] == "book" for o in obs)
 
     blocked = None
-    if total > 0 and min(bull, bear) / total > conflict_ratio / 2:
+
+    # A crowd of weak features must not outvote the one that actually works.
+    # Six walls at 0.06 each outweigh one book reading at 0.10, yet only the
+    # book reading has a measured edge - so require it to be present and
+    # pointing the same way as the net score.
+    if require_confirmed:
+        direction = 1 if score > 0 else -1 if score < 0 else 0
+        confirmed_agrees = any(
+            o["name"] in CONFIRMED and o["side"] == direction and o["weight"] > 0
+            for o in obs
+        )
+        if direction != 0 and not confirmed_agrees:
+            blocked = "no confirmed-edge feature backing this direction"
+
+    if blocked is None and total > 0 and min(bull, bear) / total > conflict_ratio / 2:
         if abs(score) < threshold * 1.5:
             blocked = "conflicting signals — market undecided"
 

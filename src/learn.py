@@ -33,7 +33,9 @@ import journal
 
 MIN_SAMPLES = 40
 SHRINKAGE = 0.35          # how far a weight moves toward the evidence per update
-BASE_HORIZON = "120"      # which forward window drives the weights
+BASE_HORIZON = "30"       # measured: book imbalance is strongest at 30s
+                          # and decays with horizon, as microstructure
+                          # information should
 WEIGHTS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "data", "weights.json")
 
