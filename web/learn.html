@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tape &amp; Book — what it learned</title>
+<style>
+:root{
+  --bg:#080b11; --panel:#0e131c; --panel2:#131a26; --line:#1e2836;
+  --ink:#c7d3e3; --dim:#6b7a8f; --accent:#4a9eff;
+  --bid:#26a69a; --ask:#ef5350; --warn:#e0a33e;
+  --mono:"Cascadia Mono","Consolas","SF Mono",monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:12px/1.55 var(--mono);
+  min-height:100vh;padding-block:0 40px}
+#top{background:var(--panel);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:13px;padding:9px 14px;flex-wrap:wrap;
+  position:sticky;top:0;z-index:5}
+.brand{font-weight:700;letter-spacing:.06em;color:var(--accent)}
+select,button,a.btn{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+  font:inherit;padding:4px 8px;border-radius:2px;cursor:pointer;text-decoration:none}
+select:hover,button:hover,a.btn:hover{border-color:var(--accent)}
+button.go{background:var(--accent);color:#04070c;border-color:var(--accent);font-weight:600}
+.grow{flex:1}
+.wrap{max-width:1140px;margin:0 auto;padding-inline:16px}
+h2{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);
+  font-weight:500;margin:26px 0 10px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:6px}
+.card{background:var(--panel);padding:13px 14px}
+.card .k{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+.card .v{font-size:22px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.card .d{font-size:10.5px;color:var(--dim);margin-top:5px;line-height:1.45}
+table{width:100%;border-collapse:collapse;font-size:11.5px;
+  background:var(--panel);border:1px solid var(--line)}
+th{background:var(--panel2);color:var(--dim);font-weight:500;text-align:right;
+  padding:6px 9px;font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+  position:sticky;top:41px;z-index:2}
+th:first-child,td:first-child{text-align:left}
+td{padding:5px 9px;text-align:right;border-bottom:1px solid #141c28;
+  font-variant-numeric:tabular-nums}
+tr:hover td{background:var(--panel2)}
+.up{color:var(--bid)} .dn{color:var(--ask)} .w{color:var(--warn)} .dim{color:var(--dim)}
+.src{font-size:9px;padding:1px 5px;border-radius:2px;background:var(--panel2);color:var(--dim)}
+.src.book{background:#16293a;color:var(--accent)}
+.empty{background:var(--panel);border:1px solid var(--line);padding:26px 20px;
+  text-align:center;color:var(--dim);line-height:1.9}
+.note{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--warn);
+  padding:12px 15px;margin-top:16px;color:var(--ink);line-height:1.65;font-size:11.5px}
+.note b{color:var(--warn)}
+.bar{display:inline-block;height:6px;background:var(--panel2);border-radius:3px;
+  width:54px;overflow:hidden;vertical-align:middle;margin-right:6px}
+.bar i{display:block;height:100%;background:var(--accent)}
+</style>
+</head>
+<body>
+<div id="top">
+  <span class="brand">TAPE &amp; BOOK · LEARNING</span>
+  <select id="symSel"></select>
+  <select id="hSel">
+    <option value="30">horizon 30 s</option>
+    <option value="120" selected>horizon 120 s</option>
+    <option value="300">horizon 300 s</option>
+  </select>
+  <button id="btnRefresh">refresh</button>
+  <button id="btnApply" class="go">apply weights</button>
+  <a class="btn" href="/live">← LIVE</a>
+  <a class="btn" href="/">history</a>
+  <span class="grow"></span>
+  <span class="dim" id="status">—</span>
+</div>
+
+<div class="wrap">
+  <h2>Training material</h2>
+  <div class="cards" id="cards"></div>
+
+  <h2>Observation skill</h2>
+  <div id="tableWrap"></div>
+
+  <div class="note">
+    <b>How to read this.</b> Every observation is stored with the price at that moment, and after
+    30, 120 and 300 seconds the move that actually followed is appended.
+    <b>Hit rate</b> is how often the market went the way the observation pointed.
+    <b>Lower bound</b> is the cautious version of that figure — it drops on small samples,
+    so three hits out of three will not outrank six hundred out of a thousand.
+    <b>OOS</b> is the hit rate on data not used to set the weight. If it
+    disagrees with the column beside it, the signal is fitting noise rather than an edge,
+    so that feature's weight is cut.
+    Weights move <b>gradually</b> (35% of the way to target), so one strange day
+    cannot flip the bot.
+  </div>
+</div>
+
+<script src="/learn.js"></script>
+</body>
+</html>

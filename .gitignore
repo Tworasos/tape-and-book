@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------
+# Never commit runtime data. It is large, personal, and useless to
+# anyone else: trading state, journals, cached market data.
+# ---------------------------------------------------------------
+data/
+*.jsonl
+*.npz
+*.parquet
+*.scid
+*.depth
+
+# Learned weights and trader state are per-install
+weights.json
+trader_*.json
+
+# ---------------------------------------------------------------
+# Secrets. There are none today (all data sources are public and
+# key-free) but the moment a broker is wired in, this matters.
+# ---------------------------------------------------------------
+.env
+.env.*
+*.key
+*.pem
+secrets.json
+api_keys*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local scratch
+*.log
+*.tmp
+tmp/
+
+# Generated reports
+out/
