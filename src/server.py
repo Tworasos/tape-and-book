@@ -200,7 +200,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send("forbidden host", "text/plain; charset=utf-8", 403)
             return False
         if not _limiter.allow():
-            self._send("slow down", "text/plain; charset=utf-8", 429)
+            # JSON, because the frontend parses every response as JSON and a
+            # bare string here crashed it instead of degrading gracefully.
+            self._json({"error": "rate limited"}, 429)
             return False
         return True
 
@@ -313,6 +315,20 @@ class Handler(BaseHTTPRequestHandler):
                 "sweeps": lambda: {"sweeps": feed.sweeps()},
                 "cvd": feed.cvd_curve,
             }
+            if what == "all":
+                # One round trip instead of nine. The UI polls this every
+                # second; separate calls were both slower and self-throttling.
+                return self._json({
+                    "status": feed.status(),
+                    "dom": feed.dom(int(q.get("levels", 14))),
+                    "trades": feed.recent_trades(60),
+                    "events": feed.recent_events(40),
+                    "tape": feed.tape_stats() or {},
+                    "footprint": feed.footprint(),
+                    "large": feed.large(),
+                    "sweeps": feed.sweeps(),
+                    "decision": self._live_decision(feed),
+                })
             if what in readers:
                 return self._json(readers[what]())
             if what == "decision":

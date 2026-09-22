@@ -374,12 +374,13 @@ async function tickBot() {
 /* ---------- loop ---------- */
 async function tick() {
   try {
-    const [st, dom, tr, ev, dec, tape, foot, large, sw] = await Promise.all([
-      api('/api/live/status'), api('/api/live/dom', { levels: 14 }),
-      api('/api/live/trades', { n: 60 }), api('/api/live/events', { n: 40 }),
-      api('/api/live/decision'), api('/api/live/tape'),
-      api('/api/live/footprint'), api('/api/live/large'), api('/api/live/sweeps'),
-    ]);
+    // One request carries the whole live snapshot; nine separate polls were
+    // slower and tripped the server's own rate limiter.
+    const all = await api('/api/live/all', { levels: 14 });
+    const st = all.status, dom = all.dom, dec = all.decision, tape = all.tape;
+    const foot = all.footprint;
+    const tr = { trades: all.trades }, ev = { events: all.events };
+    const large = { trades: all.large.trades }, sw = { sweeps: all.sweeps.sweeps };
 
     $('dot').className = 'dot' + (st.connected ? ' on' : '');
     $('conn').textContent = st.connected ? 'connected' : (st.error ? 'error' : 'connecting…');

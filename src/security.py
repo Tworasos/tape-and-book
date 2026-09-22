@@ -107,7 +107,10 @@ class RateLimiter:
     page from hammering the trading loop into the ground.
     """
 
-    def __init__(self, limit=240, window=10.0):
+    def __init__(self, limit=1200, window=10.0):
+        # The UI polls ~12 endpoints per second and a user may keep two tabs
+        # open, so a tight limit throttles the app itself. This is a runaway
+        # guard, not a security control - the Host and Origin checks are.
         self.limit = limit
         self.window = window
         self._hits = []
