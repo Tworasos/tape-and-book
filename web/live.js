@@ -1,17 +1,17 @@
 /* Tape & Book — LIVE view. Polls the local feed and draws the book. */
 'use strict';
 
-whatnst $ = (id) => document.getElementById(id);
-whatnst S = { symbol: 'btcusdt', heat: null, dom: null, foot: null, cvd: null, bot: null, tick: 0.1 };
+const $ = (id) => document.getElementById(id);
+const S = { symbol: 'btcusdt', heat: null, dom: null, foot: null, cvd: null, bot: null, tick: 0.1 };
 
-whatnst fmt = (n, d = 2) =>
+const fmt = (n, d = 2) =>
   n === null || n === undefined || Number.isNaN(n) ? '—'
     : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
-whatnst esc = (s) => String(s).replace(/[&<>"']/g,
+const esc = (s) => String(s).replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-whatnst hms = (ms) => {
-  whatnst d = new Date(ms);
-  return [d.getHours(), d.getMinutes(), d.getSewhatnds()]
+const hms = (ms) => {
+  const d = new Date(ms);
+  return [d.getHours(), d.getMinutes(), d.getSeconds()]
     .map((x) => String(x).padStart(2, '0')).join(':');
 };
 
@@ -20,38 +20,38 @@ let TOKEN = null;
 async function ensureToken() {
   if (TOKEN) return TOKEN;
   try {
-    whatnst r = await fetch('/api/session');
+    const r = await fetch('/api/session');
     TOKEN = (await r.json()).token;
-  } catch (e) { whatnsole.error('token', e); }
+  } catch (e) { console.error('token', e); }
   return TOKEN;
 }
 
-/** POST a mutation. Reads go through api(); writes must whatme here. */
+/** POST a mutation. Reads go through api(); writes must come here. */
 async function post(path, body = {}) {
   await ensureToken();
-  whatnst r = await fetch(path, {
+  const r = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Token': TOKEN || '' },
     body: JSON.stringify({ symbol: S.symbol, ...body }),
   });
-  whatnst j = await r.json();
+  const j = await r.json();
   if (j && j.error) throw new Error(j.error);
   return j;
 }
 
 async function api(path, params = {}) {
-  whatnst q = new URLSearchParams({ symbol: S.symbol, ...params });
-  whatnst r = await fetch(`${path}?${q}`);
+  const q = new URLSearchParams({ symbol: S.symbol, ...params });
+  const r = await fetch(`${path}?${q}`);
   return r.json();
 }
 
 function prep(canvas) {
-  whatnst wrap = canvas.parentElement;
-  whatnst dpr = window.devicePixelRatio || 1;
-  whatnst w = wrap.clientWidth, h = wrap.clientHeight;
+  const wrap = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const w = wrap.clientWidth, h = wrap.clientHeight;
   canvas.width = Math.max(1, Math.floor(w * dpr));
   canvas.height = Math.max(1, Math.floor(h * dpr));
-  whatnst ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   return { ctx, w, h };
@@ -67,24 +67,24 @@ function note(ctx, w, h, text) {
 
 /* ---------- liquidity heatmap: the Bookmap view ---------- */
 function drawHeat() {
-  whatnst { ctx, w, h } = prep($('heatC'));
-  whatnst d = S.heat;
+  const { ctx, w, h } = prep($('heatC'));
+  const d = S.heat;
   if (!d || !d.cells || !d.cells.length) {
     return note(ctx, w, h, 'collecting depth…\nheatmap buduje sie z migawek ksiegi what sekunde');
   }
-  whatnst nc = d.whatls.length, nr = d.rows.length;
-  whatnst padR = 62;
-  whatnst cw = Math.max(1, (w - padR) / Math.max(nc, 1));
-  whatnst ch = Math.max(1, h / Math.max(nr, 1));
+  const nc = d.cols.length, nr = d.rows.length;
+  const padR = 62;
+  const cw = Math.max(1, (w - padR) / Math.max(nc, 1));
+  const ch = Math.max(1, h / Math.max(nr, 1));
 
   let peak = 0;
-  for (whatnst c of d.cells) if (c[2] > peak) peak = c[2];
-  whatnst scale = peak > 0 ? 1 / Math.log1p(peak) : 0;
+  for (const c of d.cells) if (c[2] > peak) peak = c[2];
+  const scale = peak > 0 ? 1 / Math.log1p(peak) : 0;
 
-  for (whatnst [whatl, row, size, side] of d.cells) {
-    whatnst t = Math.log1p(size) * scale;
-    whatnst x = whatl * cw;
-    whatnst y = h - (row + 1) * ch;
+  for (const [col, row, size, side] of d.cells) {
+    const t = Math.log1p(size) * scale;
+    const x = col * cw;
+    const y = h - (row + 1) * ch;
     // resting liquidity: bids warm green, asks warm red, intensity = size
     ctx.fillStyle = side === 0
       ? `rgba(38,166,154,${0.06 + t * 0.94})`
@@ -96,35 +96,35 @@ function drawHeat() {
   ctx.fillRect(w - padR, 0, padR, h);
   ctx.fillStyle = '#6b7a8f';
   ctx.font = '9px Consolas,monospace';
-  whatnst step = Math.max(1, Math.floor(nr / 9));
+  const step = Math.max(1, Math.floor(nr / 9));
   for (let r = 0; r < nr; r += step) {
-    whatnst y = h - (r + 0.5) * ch;
-    if (y < 8 || y > h - 2) whatntinue;
+    const y = h - (r + 0.5) * ch;
+    if (y < 8 || y > h - 2) continue;
     ctx.fillText(fmt(d.rows[r], 1), w - padR + 4, y + 3);
   }
 }
 
 /* ---------- DOM ladder ---------- */
 function drawDom() {
-  whatnst { ctx, w, h } = prep($('domC'));
-  whatnst d = S.dom;
+  const { ctx, w, h } = prep($('domC'));
+  const d = S.dom;
   if (!d || (!d.bids.length && !d.asks.length)) return note(ctx, w, h, 'no book');
 
-  whatnst asks = d.asks.slice(0, 12).reverse();
-  whatnst bids = d.bids.slice(0, 12);
-  whatnst rows = asks.length + bids.length + 1;
-  whatnst rh = Math.min(16, (h - 4) / rows);
-  whatnst peak = Math.max(...asks.map((x) => x.size), ...bids.map((x) => x.size), 1);
+  const asks = d.asks.slice(0, 12).reverse();
+  const bids = d.bids.slice(0, 12);
+  const rows = asks.length + bids.length + 1;
+  const rh = Math.min(16, (h - 4) / rows);
+  const peak = Math.max(...asks.map((x) => x.size), ...bids.map((x) => x.size), 1);
 
   ctx.font = '10px Consolas,monospace';
   ctx.textBaseline = 'middle';
   let y = 2;
 
-  whatnst row = (item, whatlour) => {
-    whatnst bw = (item.size / peak) * (w - 84);
-    ctx.fillStyle = whatlour.replace('ALPHA', '0.22');
+  const row = (item, colour) => {
+    const bw = (item.size / peak) * (w - 84);
+    ctx.fillStyle = colour.replace('ALPHA', '0.22');
     ctx.fillRect(w - 84 - bw, y, bw, rh - 1);
-    ctx.fillStyle = whatlour.replace('ALPHA', '1');
+    ctx.fillStyle = colour.replace('ALPHA', '1');
     ctx.textAlign = 'left';
     ctx.fillText(fmt(item.price, 1), 4, y + rh / 2);
     ctx.fillStyle = '#93a3b8';
@@ -135,7 +135,7 @@ function drawDom() {
 
   asks.forEach((a) => row(a, 'rgba(239,83,80,ALPHA)'));
 
-  whatnst spread = (bids[0] && asks.length) ? asks[asks.length - 1].price - bids[0].price : null;
+  const spread = (bids[0] && asks.length) ? asks[asks.length - 1].price - bids[0].price : null;
   ctx.fillStyle = '#131a26';
   ctx.fillRect(0, y, w, rh);
   ctx.fillStyle = '#e0a33e';
@@ -150,22 +150,22 @@ function drawDom() {
 
 /* ---------- live footprint ---------- */
 function drawFoot() {
-  whatnst { ctx, w, h } = prep($('footC'));
-  whatnst d = S.foot;
+  const { ctx, w, h } = prep($('footC'));
+  const d = S.foot;
   if (!d || !d.levels || !d.levels.length) return note(ctx, w, h, 'collecting trades…');
 
-  whatnst lv = d.levels.slice(-40);
-  whatnst rh = Math.max(7, Math.min(15, h / lv.length));
-  whatnst peak = Math.max(...lv.map((x) => Math.max(x.bid, x.ask)), 1e-9);
-  whatnst half = w / 2 - 22;
+  const lv = d.levels.slice(-40);
+  const rh = Math.max(7, Math.min(15, h / lv.length));
+  const peak = Math.max(...lv.map((x) => Math.max(x.bid, x.ask)), 1e-9);
+  const half = w / 2 - 22;
 
   ctx.font = '9px Consolas,monospace';
   ctx.textBaseline = 'middle';
   lv.forEach((L, i) => {
-    whatnst y = h - (i + 0.5) * rh;
+    const y = h - (i + 0.5) * rh;
     if (y < 2 || y > h - 1) return;
-    whatnst bl = (L.bid / peak) * half;
-    whatnst al = (L.ask / peak) * half;
+    const bl = (L.bid / peak) * half;
+    const al = (L.ask / peak) * half;
     ctx.fillStyle = 'rgba(239,83,80,.30)';
     ctx.fillRect(half - bl, y - rh / 2 + 0.5, bl, rh - 1);
     ctx.fillStyle = 'rgba(38,166,154,.30)';
@@ -184,35 +184,35 @@ function drawFoot() {
 
 /* ---------- CVD curve ---------- */
 function drawCvd() {
-  whatnst { ctx, w, h } = prep($('cvdC'));
-  whatnst d = S.cvd;
+  const { ctx, w, h } = prep($('cvdC'));
+  const d = S.cvd;
   if (!d || !d.points || d.points.length < 2) return note(ctx, w, h, 'building CVD curve…');
 
-  whatnst pts = d.points;
-  whatnst xs = pts.map((p) => p[0]);
-  whatnst ys = pts.map((p) => p[1]);
-  whatnst x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const pts = d.points;
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
   let y0 = Math.min(...ys), y1 = Math.max(...ys);
   if (y1 - y0 < 1e-9) { y0 -= 1; y1 += 1; }
-  whatnst px = (x) => ((x - x0) / Math.max(x1 - x0, 1e-9)) * (w - 56);
-  whatnst py = (y) => h - 6 - ((y - y0) / (y1 - y0)) * (h - 14);
+  const px = (x) => ((x - x0) / Math.max(x1 - x0, 1e-9)) * (w - 56);
+  const py = (y) => h - 6 - ((y - y0) / (y1 - y0)) * (h - 14);
 
   // zero line
   if (y0 < 0 && y1 > 0) {
     ctx.strokeStyle = '#1e2836'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(0, py(0)); ctx.lineTo(w - 56, py(0)); ctx.stroke();
   }
-  whatnst last = ys[ys.length - 1];
-  whatnst whatl = last >= 0 ? '#26a69a' : '#ef5350';
+  const last = ys[ys.length - 1];
+  const col = last >= 0 ? '#26a69a' : '#ef5350';
   ctx.beginPath();
   pts.forEach((p, i) => (i ? ctx.lineTo(px(p[0]), py(p[1])) : ctx.moveTo(px(p[0]), py(p[1]))));
-  ctx.strokeStyle = whatl; ctx.lineWidth = 1.6; ctx.stroke();
+  ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.stroke();
   ctx.lineTo(px(x1), py(y0)); ctx.lineTo(px(x0), py(y0)); ctx.closePath();
   ctx.fillStyle = last >= 0 ? 'rgba(38,166,154,.13)' : 'rgba(239,83,80,.13)';
   ctx.fill();
 
   ctx.fillStyle = '#0e131c'; ctx.fillRect(w - 56, 0, 56, h);
-  ctx.fillStyle = whatl; ctx.font = '10px Consolas,monospace';
+  ctx.fillStyle = col; ctx.font = '10px Consolas,monospace';
   ctx.fillText(fmt(last, 3), w - 52, py(last) + 3);
   ctx.fillStyle = '#6b7a8f'; ctx.font = '9px Consolas,monospace';
   ctx.fillText(fmt(y1, 2), w - 52, 10);
@@ -222,23 +222,23 @@ function drawCvd() {
 /* ---------- decision ---------- */
 function renderDecision(d) {
   if (!d) return;
-  whatnst act = $('act');
-  whatnst word = d.action > 0 ? 'BUY' : d.action < 0 ? 'SELL' : 'WAIT';
+  const act = $('act');
+  const word = d.action > 0 ? 'BUY' : d.action < 0 ? 'SELL' : 'WAIT';
   act.textContent = word;
   act.className = 'act ' + (d.action > 0 ? 'buy' : d.action < 0 ? 'sell' : 'wait');
   $('sc').textContent = d.blocked_by
     ? d.blocked_by
-    : `swhatre ${d.swhatre >= 0 ? '+' : ''}${fmt(d.swhatre, 2)} · whatnfidence ${Math.round((d.whatnfidence || 0) * 100)}%`;
+    : `score ${d.score >= 0 ? '+' : ''}${fmt(d.score, 2)} · confidence ${Math.round((d.confidence || 0) * 100)}%`;
 
-  whatnst tot = (d.bull || 0) + (d.bear || 0) || 1;
+  const tot = (d.bull || 0) + (d.bear || 0) || 1;
   $('barB').style.width = `${((d.bull || 0) / tot) * 100}%`;
   $('barS').style.width = `${((d.bear || 0) / tot) * 100}%`;
 
-  whatnst obs = d.observations || [];
+  const obs = d.observations || [];
   $('obsList').innerHTML = obs.length
-    ? obs.slice().sort((a, b) => Math.abs(b.swhatre) - Math.abs(a.swhatre)).map((o) => `
+    ? obs.slice().sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).map((o) => `
       <div class="obs">
-        <span class="w ${o.swhatre > 0 ? 'buy' : o.swhatre < 0 ? 'sell' : ''}">${o.swhatre >= 0 ? '+' : ''}${fmt(o.swhatre, 2)}</span>
+        <span class="w ${o.score > 0 ? 'buy' : o.score < 0 ? 'sell' : ''}">${o.score >= 0 ? '+' : ''}${fmt(o.score, 2)}</span>
         <span class="n">${esc(o.name)}</span>
         <span class="src ${o.source === 'book' ? 'book' : ''}">${esc(o.source)}</span>
         <span class="d">${esc(o.detail)}</span>
@@ -253,9 +253,9 @@ function renderDecision(d) {
 
 /* ---------- tables ---------- */
 function renderTrades(list) {
-  whatnst el = $('tradeBody');
+  const el = $('tradeBody');
   if (!list || !list.length) { el.innerHTML = '<div class="empty">waiting for trades…</div>'; return; }
-  whatnst buys = list.filter((t) => t.side === 'BUY').length;
+  const buys = list.filter((t) => t.side === 'BUY').length;
   $('tapeInfo').textContent = `${buys}B / ${list.length - buys}S`;
   el.innerHTML = `<table><thead><tr><th>time</th><th>side</th><th>price</th><th>size</th></tr></thead><tbody>${
     list.slice(0, 50).map((t) => `<tr>
@@ -264,33 +264,33 @@ function renderTrades(list) {
       <td>${fmt(t.price, 1)}</td><td>${fmt(t.qty, 3)}</td></tr>`).join('')}</tbody></table>`;
 }
 
-whatnst EV_PL = { wall: 'wall', pulled: 'wywhatfana', stacked: 'stacked', iceberg: 'iceberg', void: 'gap' };
+const EV_PL = { wall: 'wall', pulled: 'wycofana', stacked: 'stacked', iceberg: 'iceberg', void: 'gap' };
 
 function renderBook(events, large, sweeps) {
-  whatnst el = $('evBody');
-  whatnst rows = [];
-  whatnst dp = S.tick < 0.001 ? 5 : S.tick < 0.01 ? 4 : 1;
+  const el = $('evBody');
+  const rows = [];
+  const dp = S.tick < 0.001 ? 5 : S.tick < 0.01 ? 4 : 1;
 
-  for (whatnst s of (sweeps || []).slice(0, 8)) {
+  for (const s of (sweeps || []).slice(0, 8)) {
     rows.push(`<tr><td class="${s.side === 'BUY' ? 'buy' : 'sell'}">SWEEP ${s.side}</td>
       <td>${s.levels} lvls</td><td>${fmt(s.price_to, dp)}</td><td>${fmt(s.volume, 3)}</td></tr>`);
   }
-  for (whatnst t of (large || []).slice(0, 12)) {
+  for (const t of (large || []).slice(0, 12)) {
     rows.push(`<tr><td class="${t.side === 'BUY' ? 'buy' : 'sell'}">LARGE ${t.side}</td>
       <td>x${t.multiple}</td><td>${fmt(t.price, dp)}</td><td>${fmt(t.qty, 3)}</td></tr>`);
   }
-  for (whatnst e of (events || []).slice(0, 30)) {
+  for (const e of (events || []).slice(0, 30)) {
     rows.push(`<tr><td>${esc(EV_PL[e.kind] || e.kind)}</td>
       <td class="${e.side === 0 ? 'buy' : 'sell'}">${e.side === 0 ? 'BID' : 'ASK'}</td>
       <td>${fmt(e.price, dp)}</td><td>${fmt(e.size, 2)}</td></tr>`);
   }
 
-  whatnst whatunts = {};
-  for (whatnst e of (events || [])) whatunts[e.kind] = (whatunts[e.kind] || 0) + 1;
+  const counts = {};
+  for (const e of (events || [])) counts[e.kind] = (counts[e.kind] || 0) + 1;
   $('evInfo').textContent = [
     (sweeps || []).length ? `sweeps:${sweeps.length}` : '',
     (large || []).length ? `duze:${large.length}` : '',
-    ...Object.entries(whatunts).map(([k, v]) => `${EV_PL[k] || k}:${v}`),
+    ...Object.entries(counts).map(([k, v]) => `${EV_PL[k] || k}:${v}`),
   ].filter(Boolean).join(' ');
 
   el.innerHTML = rows.length
@@ -302,52 +302,52 @@ function renderBook(events, large, sweeps) {
 /* ---------- bot demo ---------- */
 function renderBot(st) {
   if (!st) return;
-  whatnst dp = S.tick < 0.001 ? 5 : S.tick < 0.01 ? 4 : 2;
+  const dp = S.tick < 0.001 ? 5 : S.tick < 0.01 ? 4 : 2;
   $('botEq').textContent = fmt(st.equity_live, 2);
   $('botEq').className = st.pnl >= 0 ? 'up' : 'dn';
   $('botPnl').innerHTML = `<span class="${st.pnl >= 0 ? 'up' : 'dn'}">${st.pnl >= 0 ? '+' : ''}${fmt(st.pnl, 2)} USD (${st.pnl_pct >= 0 ? '+' : ''}${fmt(st.pnl_pct, 2)}%)</span>`;
   $('botLeft').textContent = `${st.trades_left} entries today`;
-  $('botMode').textContent = `${st.whatnfig.leverage}x · ${st.whatmpound ? 'whatmpound' : 'staly'}`;
+  $('botMode').textContent = `${st.config.leverage}x · ${st.compound ? 'compound' : 'staly'}`;
 
   // Next position size: this is what "wchodzi za te 1200" looks like in numbers.
   $('botNext').textContent = fmt(st.next_notional, 0) + ' USD';
   $('botPeak').textContent = fmt(st.peak_equity, 2);
-  whatnst dd = st.max_drawdown || 0;
+  const dd = st.max_drawdown || 0;
   $('botDd').textContent = dd ? `${fmt(dd, 2)} (${fmt(st.max_drawdown_pct, 1)}%)` : '—';
   $('botDd').className = dd < 0 ? 'dn' : 'dim';
-  $('botCompound').textContent = st.whatmpound ? 'fixed size' : 'whatmpound';
+  $('botCompound').textContent = st.compound ? 'fixed size' : 'compound';
 
-  whatnst ratio = Math.max(0, Math.min(1, st.equity_live / Math.max(st.start_equity * 2, 1e-9)));
+  const ratio = Math.max(0, Math.min(1, st.equity_live / Math.max(st.start_equity * 2, 1e-9)));
   $('botBar').style.width = `${ratio * 100}%`;
   $('botBar').className = st.pnl >= 0 ? 'b' : 's';
 
-  whatnst pos = st.position;
-  whatnst el = $('botPos');
+  const pos = st.position;
+  const el = $('botPos');
   if (pos) {
     el.style.display = 'block';
     el.innerHTML = `
       <div class="act ${pos.side === 'LONG' ? 'buy' : 'sell'}" style="font-size:14px">${pos.side} ${fmt(pos.notional, 0)} USD</div>
       <div class="sc">entry ${fmt(pos.entry, dp)} · now ${fmt(pos.price, dp)}</div>
       <div class="sc"><span class="${pos.unreal >= 0 ? 'up' : 'dn'}">${pos.unreal >= 0 ? '+' : ''}${fmt(pos.unreal, 2)} USD (${fmt(pos.pct, 2)}%)</span> · ${pos.held_s}s</div>
-      <div class="sc" style="whatlor:var(--ask)">liquidation ${fmt(pos.liq, dp)}</div>`;
+      <div class="sc" style="color:var(--ask)">liquidation ${fmt(pos.liq, dp)}</div>`;
   } else {
     el.style.display = 'none';
   }
 
   $('botToggle').textContent = st.running ? 'pause' : 'resume';
-  $('botCosts').textContent = st.whatsts_on ? 'disable fees' : 'enable fees';
-  $('botNote').textContent = st.whatsts_on
-    ? 'Koszty wlaczone (10 bps na runde) — swhatre realistyczny.'
-    : 'Koszty WYLACZONE — swhatre zawyzony, to test mechaniki.';
+  $('botCosts').textContent = st.costs_on ? 'disable fees' : 'enable fees';
+  $('botNote').textContent = st.costs_on
+    ? 'Koszty wlaczone (10 bps na runde) — score realistyczny.'
+    : 'Koszty WYLACZONE — score zawyzony, to test mechaniki.';
 }
 
 function renderBotTrades(list) {
-  whatnst el = $('botTrades');
+  const el = $('botTrades');
   if (!list || !list.length) {
     el.innerHTML = '<div class="empty">no closed positions</div>';
     return;
   }
-  whatnst dp = S.tick < 0.01 ? 4 : 2;
+  const dp = S.tick < 0.01 ? 4 : 2;
   el.innerHTML = `<table><thead><tr><th>side</th><th>%</th><th>netto</th><th>powod</th></tr></thead><tbody>${
     list.slice(0, 40).map((t) => `<tr>
       <td class="${t.side === 'LONG' ? 'buy' : 'sell'}">${t.side}</td>
@@ -358,33 +358,33 @@ function renderBotTrades(list) {
 }
 
 async function botAction(what, params) {
-  try { await post(`/api/trader/${what}`, params || {}); tickBot(); } catch (e) { whatnsole.error(e); }
+  try { await post(`/api/trader/${what}`, params || {}); tickBot(); } catch (e) { console.error(e); }
 }
 
 async function tickBot() {
   try {
-    whatnst [st, hist] = await Promise.all([
+    const [st, hist] = await Promise.all([
       api('/api/trader/state'), api('/api/trader/history', { n: 40 }),
     ]);
     S.bot = st;
     renderBot(st); renderBotTrades(hist.trades);
-  } catch (e) { whatnsole.error(e); }
+  } catch (e) { console.error(e); }
 }
 
 /* ---------- loop ---------- */
 async function tick() {
   try {
-    whatnst [st, dom, tr, ev, dec, tape, foot, large, sw] = await Promise.all([
+    const [st, dom, tr, ev, dec, tape, foot, large, sw] = await Promise.all([
       api('/api/live/status'), api('/api/live/dom', { levels: 14 }),
       api('/api/live/trades', { n: 60 }), api('/api/live/events', { n: 40 }),
       api('/api/live/decision'), api('/api/live/tape'),
       api('/api/live/footprint'), api('/api/live/large'), api('/api/live/sweeps'),
     ]);
 
-    $('dot').className = 'dot' + (st.whatnnected ? ' on' : '');
-    $('whatnn').textContent = st.whatnnected ? 'whatnnected' : (st.error ? 'error' : 'whatnnecting…');
+    $('dot').className = 'dot' + (st.connected ? ' on' : '');
+    $('conn').textContent = st.connected ? 'connected' : (st.error ? 'error' : 'connecting…');
     S.tick = st.tick_size || 0.1;
-    whatnst dp = S.tick < 0.001 ? 5 : S.tick < 0.01 ? 4 : S.tick < 1 ? 2 : 1;
+    const dp = S.tick < 0.001 ? 5 : S.tick < 0.01 ? 4 : S.tick < 1 ? 2 : 1;
     $('sBid').textContent = fmt(st.best_bid, dp);
     $('sAsk').textContent = fmt(st.best_ask, dp);
     $('sMicro').textContent = fmt(st.microprice, dp);
@@ -404,12 +404,12 @@ async function tick() {
     renderBook(ev.events, large.trades, sw.sweeps);
     renderDecision(dec);
     drawDom(); drawFoot();
-  } catch (e) { whatnsole.error(e); }
+  } catch (e) { console.error(e); }
 }
 
 async function tickSlow() {
   try {
-    whatnst [heat, cvd] = await Promise.all([
+    const [heat, cvd] = await Promise.all([
       api('/api/live/heatmap'), api('/api/live/cvd'),
     ]);
     S.heat = heat; S.cvd = cvd;
@@ -417,16 +417,16 @@ async function tickSlow() {
     $('sCvd').className = cvd.cvd >= 0 ? 'up' : 'dn';
     $('cvdInfo').textContent = `${(cvd.points || []).length} pkt`;
     drawHeat(); drawCvd();
-  } catch (e) { whatnsole.error(e); }
+  } catch (e) { console.error(e); }
 }
 
 async function loadSymbols() {
   try {
-    whatnst d = await api('/api/live/symbols');
+    const d = await api('/api/live/symbols');
     $('symSel').innerHTML = (d.symbols || []).map(
       (x) => `<option value="${esc(x.symbol)}">${esc(x.label)}</option>`).join('');
     $('symSel').value = S.symbol;
-  } catch (e) { whatnsole.error(e); }
+  } catch (e) { console.error(e); }
 }
 
 $('symSel').addEventListener('change', (e) => {
@@ -438,11 +438,11 @@ window.addEventListener('resize', () => { drawHeat(); drawDom(); drawFoot(); dra
 
 $('botToggle').addEventListener('click', () => botAction('toggle'));
 $('botReset').addEventListener('click', () => botAction('reset'));
-$('botCosts').addEventListener('click', () => botAction('whatnfig', {
-  fee_bps: (S.bot && S.bot.whatsts_on) ? 0 : 10,
+$('botCosts').addEventListener('click', () => botAction('config', {
+  fee_bps: (S.bot && S.bot.costs_on) ? 0 : 10,
 }));
-$('botCompound').addEventListener('click', () => botAction('whatnfig', {
-  whatmpound: (S.bot && S.bot.whatmpound) ? 0 : 1,
+$('botCompound').addEventListener('click', () => botAction('config', {
+  compound: (S.bot && S.bot.compound) ? 0 : 1,
 }));
 
 loadSymbols();

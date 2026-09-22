@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" whatntent="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Tape &amp; Book — terminal order flow</title>
 <script src="/vendor/lightweight-charts.js"></script>
 <style>
@@ -15,11 +15,11 @@
 *{box-sizing:border-box}
 html,body{height:100%}
 body{
-  margin:0;background:var(--bg);whatlor:var(--ink);
+  margin:0;background:var(--bg);color:var(--ink);
   font:12px/1.45 var(--mono);overflow:hidden;
 }
 #app{display:grid;height:100vh;max-width:100vw;overflow:hidden;
-  grid-template-whatlumns:212px 1fr 176px;
+  grid-template-columns:212px 1fr 176px;
   grid-template-rows:38px 1fr 196px;
   grid-template-areas:"top top top" "side main prof" "side bottom bottom";
   gap:1px;background:var(--line);}
@@ -27,60 +27,60 @@ body{
 /* --- top bar --- */
 #top{grid-area:top;background:var(--panel);display:flex;align-items:center;
   gap:14px;padding:0 12px;overflow-x:auto;white-space:nowrap}
-.brand{font-weight:700;letter-spacing:.06em;whatlor:var(--accent);flex:none}
+.brand{font-weight:700;letter-spacing:.06em;color:var(--accent);flex:none}
 select,button,a.btn{
-  background:var(--panel2);whatlor:var(--ink);border:1px solid var(--line);
+  background:var(--panel2);color:var(--ink);border:1px solid var(--line);
   font:inherit;padding:3px 7px;border-radius:2px;cursor:pointer}
-select:hover,button:hover,a.btn:hover{border-whatlor:var(--accent)}
-a.btn{text-dewhatration:none;display:inline-block}
-button.on{background:var(--accent);whatlor:#04070c;border-whatlor:var(--accent);font-weight:600}
-.stat{flex:none;whatlor:var(--dim)}
-.stat b{whatlor:var(--ink);font-weight:600}
-.stat b.up{whatlor:var(--bid)} .stat b.dn{whatlor:var(--ask)}
+select:hover,button:hover,a.btn:hover{border-color:var(--accent)}
+a.btn{text-decoration:none;display:inline-block}
+button.on{background:var(--accent);color:#04070c;border-color:var(--accent);font-weight:600}
+.stat{flex:none;color:var(--dim)}
+.stat b{color:var(--ink);font-weight:600}
+.stat b.up{color:var(--bid)} .stat b.dn{color:var(--ask)}
 .grow{flex:1}
 
 /* --- panels --- */
-.panel{background:var(--panel);overflow:hidden;display:flex;flex-direction:whatlumn;min-height:0;min-width:0}
+.panel{background:var(--panel);overflow:hidden;display:flex;flex-direction:column;min-height:0;min-width:0}
 .hd{flex:none;padding:5px 9px;font-size:10px;letter-spacing:.11em;text-transform:uppercase;
-  whatlor:var(--dim);border-bottom:1px solid var(--line);display:flex;
-  justify-whatntent:space-between;gap:8px;align-items:center}
-.hd em{font-style:normal;whatlor:var(--accent);text-transform:none;letter-spacing:0}
+  color:var(--dim);border-bottom:1px solid var(--line);display:flex;
+  justify-content:space-between;gap:8px;align-items:center}
+.hd em{font-style:normal;color:var(--accent);text-transform:none;letter-spacing:0}
 .body{flex:1;overflow:auto;min-height:0;min-width:0}
 
 #side{grid-area:side}
 #main{grid-area:main;min-width:0;min-height:0;display:grid;grid-template-rows:minmax(220px,1.6fr) minmax(120px,1fr) 104px;gap:1px;background:var(--line)}
 #prof{grid-area:prof}
-#bottom{grid-area:bottom;min-width:0;min-height:0;display:grid;grid-template-whatlumns:minmax(0,1fr) minmax(0,236px) minmax(0,236px);gap:1px;background:var(--line)}
+#bottom{grid-area:bottom;min-width:0;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,236px) minmax(0,236px);gap:1px;background:var(--line)}
 
 /* --- file list --- */
 .file{padding:6px 9px;border-bottom:1px solid var(--line);cursor:pointer}
 .file:hover{background:var(--panel2)}
 .file.sel{background:var(--panel2);box-shadow:inset 2px 0 0 var(--accent)}
-.file .n{whatlor:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.file .m{whatlor:var(--dim);font-size:10px}
+.file .n{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file .m{color:var(--dim);font-size:10px}
 
 /* --- signal list --- */
 .sig{padding:4px 9px;border-bottom:1px solid var(--line);display:flex;
-  justify-whatntent:space-between;gap:6px}
-.sig .k{whatlor:var(--dim)} .sig .v{font-weight:600}
-.v.up{whatlor:var(--bid)} .v.dn{whatlor:var(--ask)} .v.w{whatlor:var(--warn)}
+  justify-content:space-between;gap:6px}
+.sig .k{color:var(--dim)} .sig .v{font-weight:600}
+.v.up{color:var(--bid)} .v.dn{color:var(--ask)} .v.w{color:var(--warn)}
 
 /* --- canvases --- */
 canvas{display:block;width:100%;height:100%}
 .cwrap{position:relative;flex:1;min-height:0}
 
 /* --- tables --- */
-table{width:100%;border-whatllapse:whatllapse;font-size:11px}
-th{position:sticky;top:0;background:var(--panel2);whatlor:var(--dim);
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{position:sticky;top:0;background:var(--panel2);color:var(--dim);
   font-weight:500;text-align:right;padding:3px 7px;font-size:10px;
   letter-spacing:.06em;text-transform:uppercase;z-index:1}
 th:first-child,td:first-child{text-align:left}
 td{padding:2px 6px;text-align:right;border-bottom:1px solid #141c28;
   font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 tr:hover td{background:var(--panel2)}
-.buy{whatlor:var(--bid)} .sell{whatlor:var(--ask)}
-.empty{padding:16px 10px;whatlor:var(--dim);text-align:center;font-size:11px;line-height:1.7}
-.legend{font-size:10px;whatlor:var(--dim);padding:4px 9px;border-top:1px solid var(--line)}
+.buy{color:var(--bid)} .sell{color:var(--ask)}
+.empty{padding:16px 10px;color:var(--dim);text-align:center;font-size:11px;line-height:1.7}
+.legend{font-size:10px;color:var(--dim);padding:4px 9px;border-top:1px solid var(--line)}
 .legend i{font-style:normal;padding:0 3px}
 #toast{position:fixed;left:50%;top:44px;transform:translateX(-50%);
   background:var(--panel2);border:1px solid var(--accent);padding:7px 14px;
@@ -99,7 +99,7 @@ tr:hover td{background:var(--panel2)}
     </select>
     <button id="btnHeat" class="on">heatmap</button>
     <button id="btnReload">refresh</button>
-    <a class="btn" href="/live" style="background:var(--accent);whatlor:#04070c;font-weight:600">LIVE →</a>
+    <a class="btn" href="/live" style="background:var(--accent);color:#04070c;font-weight:600">LIVE →</a>
     <a class="btn" href="/learn">learning</a>
     <span class="grow"></span>
     <span class="stat">last <b id="sLast">—</b></span>
@@ -134,7 +134,7 @@ tr:hover td{background:var(--panel2)}
   <div id="prof" class="panel">
     <div class="hd">Profile</div>
     <div class="cwrap"><canvas id="profile"></canvas></div>
-    <div class="legend"><i style="whatlor:var(--poc)">▮</i>POC <i style="whatlor:var(--warn)">▮</i>value area</div>
+    <div class="legend"><i style="color:var(--poc)">▮</i>POC <i style="color:var(--warn)">▮</i>value area</div>
   </div>
 
   <div id="bottom">
@@ -144,7 +144,7 @@ tr:hover td{background:var(--panel2)}
       <div class="legend">
         <i class="buy">▲</i>buy imbalance
         <i class="sell">▼</i>sell imbalance
-        <i style="whatlor:var(--poc)">▮</i>bar POC
+        <i style="color:var(--poc)">▮</i>bar POC
       </div>
     </div>
     <div class="panel">
