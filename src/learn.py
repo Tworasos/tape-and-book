@@ -21,6 +21,10 @@ Guards that keep it from fooling us:
                    not outrank a 600/1000 one
     HOLDOUT        score() reports in-sample and out-of-sample separately; if
                    they disagree, the "edge" is fitting noise
+    ONE PER ROW    a feature counts once per journal row, by its net side, so
+                   twelve copies of it in one moment are one sample, not twelve
+    FLAT EXCLUDED  a horizon where price did not move is neither a hit nor a
+                   miss; counting it as a miss drags every feature below 50%
 """
 
 from __future__ import annotations
@@ -52,25 +56,38 @@ def wilson_lower(hits, n, z=1.96):
 
 
 def _tally(rows, horizon=BASE_HORIZON):
-    """Per-observation-type counts of correct direction and average move."""
+    """Per-observation-type counts of correct direction and average move.
+
+    `n` counts rows in which the feature had a net direction; `decided` only
+    those where price actually moved, which is the hit-rate denominator.
+    """
     stats = {}
     for row in rows:
         fwd = row.get("fwd", {}).get(horizon)
         if fwd is None:
             continue
+        # One vote per feature per row. Several copies of the same observation
+        # in one moment (three walls, two sweeps) share one outcome; counting
+        # them separately multiplied the sample size without adding evidence.
+        net, src = {}, {}
         for o in row.get("obs", []):
-            name, side = o["n"], o["s"]
+            net[o["n"]] = net.get(o["n"], 0) + o["s"]
+            src.setdefault(o["n"], o.get("src", "tape"))
+        for name, total in net.items():
+            side = (total > 0) - (total < 0)
             if side == 0:
                 continue
             st = stats.setdefault(name, {
-                "n": 0, "hits": 0, "sum_bps": 0.0, "sum_abs": 0.0,
-                "src": o.get("src", "tape"),
+                "n": 0, "decided": 0, "hits": 0, "sum_bps": 0.0, "sum_abs": 0.0,
+                "src": src[name],
             })
             st["n"] += 1
             # signed move in the direction the observation predicted
             aligned = fwd * side
-            if aligned > 0:
-                st["hits"] += 1
+            if aligned != 0:
+                st["decided"] += 1
+                if aligned > 0:
+                    st["hits"] += 1
             st["sum_bps"] += aligned
             st["sum_abs"] += abs(fwd)
     return stats
@@ -90,30 +107,33 @@ def analyse(symbol=None, days=7, horizon=BASE_HORIZON, holdout=0.3):
 
     features = []
     for name, st in sorted(tr.items(), key=lambda kv: -kv[1]["n"]):
-        n, hits = st["n"], st["hits"]
-        rate = hits / n if n else 0.0
-        lower = wilson_lower(hits, n)
+        n, decided, hits = st["n"], st["decided"], st["hits"]
+        rate = hits / decided if decided else 0.0
+        lower = wilson_lower(hits, decided)
         avg = st["sum_bps"] / n if n else 0.0
         t = te.get(name)
-        oos_rate = (t["hits"] / t["n"]) if t and t["n"] else None
+        oos_rate = (t["hits"] / t["decided"]) if t and t["decided"] else None
         oos_avg = (t["sum_bps"] / t["n"]) if t and t["n"] else None
         features.append({
             "name": name,
             "source": st["src"],
             "samples": n,
+            "decided": decided,
+            "flat": n - decided,
             "hit_rate": round(rate * 100, 1),
             "hit_lower": round(lower * 100, 1),
             "avg_bps": round(avg, 2),
-            "oos_samples": t["n"] if t else 0,
+            "oos_samples": t["decided"] if t else 0,
             "oos_hit_rate": round(oos_rate * 100, 1) if oos_rate is not None else None,
             "oos_avg_bps": round(oos_avg, 2) if oos_avg is not None else None,
             "agrees": (None if oos_rate is None
                        else bool((rate > 0.5) == (oos_rate > 0.5))),
-            "enough": n >= MIN_SAMPLES,
+            "enough": decided >= MIN_SAMPLES,
         })
 
     return {
         "rows": len(rows),
+        "legacy_rows": sum(1 for r in rows if not r.get("v")),
         "train_rows": len(train),
         "test_rows": len(test),
         "horizon_s": int(horizon),
@@ -134,7 +154,7 @@ def propose_weights(symbol=None, days=7, horizon=BASE_HORIZON, current=None):
         base = current.get(name, 0.4)
         if not f["enough"]:
             out.append({"name": name, "old": base, "new": base,
-                        "reason": f"not enough samples ({f['samples']}/{MIN_SAMPLES})",
+                        "reason": f"not enough samples ({f['decided']}/{MIN_SAMPLES})",
                         "changed": False, **f})
             continue
 

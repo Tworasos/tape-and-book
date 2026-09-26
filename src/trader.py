@@ -24,6 +24,7 @@ entry and exit fees on notional, so the same run can be replayed honestly.
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
@@ -62,6 +63,137 @@ DEFAULTS = {
     "max_notional": 0.0,
 }
 
+# Accepted range for every setting the API can change. Out-of-range values are
+# refused rather than clamped: leverage=0 used to raise inside every tick, and
+# the loop swallowed it, so the bot simply stopped with no visible reason.
+LIMITS = {
+    "capital": (1.0, 1e9),
+    "leverage": (1.0, 125.0),
+    "max_trades_per_day": (0, 1000),
+    "fee_bps": (0.0, 100.0),
+    "target_pct": (0.01, 100.0),
+    "stop_pct": (0.01, 100.0),
+    "min_score": (0.0, 100.0),
+    "compound": (0, 1),
+    "max_notional": (0.0, 1e12),
+    "confirm_ticks": (1, 3600),
+    "cooldown_s": (0, 86400),
+}
+
+# How far back a one-off event may be when there is no cursor, i.e. for the
+# decision panel. The bot itself counts each event exactly once.
+FRESH_MS = 2000
+
+
+def observe(feed, seen=None):
+    """Build observations from the live book and tape.
+
+    Two kinds of evidence, handled differently:
+
+      state   book imbalance, walls standing right now, tape imbalance over
+              the recent prints - read fresh on every call
+      events  a wall pulled, an iceberg, a sweep, a large print - each one
+              reported ONCE, on the first call after it happened
+
+    The distinction matters for the journal, which samples once a second. A
+    large print used to stay in the observations for as long as it sat in the
+    last 1200 trades, which on a quiet symbol is minutes; one print became
+    hundreds of labelled "samples", all sharing nearly the same outcome.
+
+    `seen` is the cursor returned by the previous call. None means "no
+    cursor": events from the latest snapshot and the last FRESH_MS of trades.
+    Returns (observations, new_cursor).
+    """
+    W = decision.WEIGHTS
+    st = feed.status()
+    obs = []
+    bi = st.get("imbalance") or 0.0
+    if abs(bi) > 0.1:
+        obs.append(decision.Observation(
+            "book_imbalance", 1 if bi > 0 else -1,
+            W["book_imbalance"] * min(abs(bi), 1.0), f"book {bi:+.2f}", "book"))
+
+    latest, events = feed.book_events(None if seen is None else seen["snap"])
+    after_snap = latest - 1 if seen is None else seen["snap"]
+    relevant = [e for e in events
+                if (e.get("kind") == "wall" and e.get("snap") == latest)
+                or (e.get("kind") in ("pulled", "iceberg") and e.get("snap", 0) > after_snap)]
+    for e in relevant[:12]:
+        side = 1 if e.get("side") == 0 else -1      # bid-side liquidity supports price
+        kind = e.get("kind")
+        if kind == "wall":
+            obs.append(decision.Observation("wall_ahead", side, W["wall_ahead"],
+                f"wall {int(e.get('size', 0))} @ {e.get('price')}", "book"))
+        elif kind == "pulled":
+            obs.append(decision.Observation("wall_pulled", -side, W["wall_pulled"],
+                f"pulled @ {e.get('price')}", "book"))
+        elif kind == "iceberg":
+            obs.append(decision.Observation("iceberg", side, W["iceberg"],
+                f"iceberg @ {e.get('price')}", "book"))
+
+    tape = feed.tape_stats(400) or {}
+    imb = tape.get("imbalance")
+    if imb is not None and abs(imb) > 0.12:
+        obs.append(decision.Observation("tape_imbalance", 1 if imb > 0 else -1,
+            W["tape_imbalance"] * min(abs(imb), 1.0), f"tape {imb:+.2f}", "tape"))
+
+    # Judge only trades up to `last_seq`. Anything that arrives while this runs
+    # belongs to the next call; otherwise it would be counted by both.
+    last = feed.last_trade()
+    last_seq = last["seq"] if last else 0
+    if seen is None:
+        cutoff = (last["ts"] - FRESH_MS) if last else 0
+        done = lambda s: s["ts_end"] <= cutoff                            # noqa: E731
+        new_print = lambda t: cutoff < t["ts"] and t["seq"] <= last_seq  # noqa: E731
+        swept_to = 0
+    else:
+        done = lambda s: s["seq_from"] <= seen["sweep"]                  # noqa: E731
+        new_print = lambda t: seen["trade"] < t["seq"] <= last_seq      # noqa: E731
+        swept_to = seen["sweep"]
+
+    fresh = []
+    for s in feed.sweeps():
+        if done(s):
+            # Counted already (or too old to count). Whatever it has grown into
+            # since is the same sweep, even if the window re-segments it.
+            swept_to = max(swept_to, s["seq_to"])
+        elif s["seq_to"] <= last_seq:
+            fresh.append(s)
+    for s in fresh[:2]:
+        obs.append(decision.Observation("sweep", 1 if s["side"] == "BUY" else -1,
+            W["sweep"], f"sweep {s['side']} / {s['levels']} lvls", "tape"))
+        swept_to = max(swept_to, s["seq_to"])
+
+    for t in [t for t in feed.large() if new_print(t)][:3]:
+        obs.append(decision.Observation("large_print", 1 if t["side"] == "BUY" else -1,
+            W["large_print"], f"large {t['side']} x{t['multiple']}", "tape"))
+
+    return obs, {"snap": latest, "trade": last_seq, "sweep": swept_to}
+
+
+def _px(x):
+    """Round a price for display without flattening sub-cent instruments:
+    2 decimals turned every DOGE entry and exit into 0.2."""
+    return round(float(x), 8)
+
+
+def validate(key, value):
+    """Coerce an API-supplied setting to its type, or raise ValueError."""
+    if key not in LIMITS:
+        raise ValueError(f"unknown setting: {key}")
+    if isinstance(value, bool):
+        value = int(value)
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} must be a number") from None
+    if not math.isfinite(num):
+        raise ValueError(f"{key} must be a finite number")
+    lo, hi = LIMITS[key]
+    if not lo <= num <= hi:
+        raise ValueError(f"{key} must be between {lo:g} and {hi:g}")
+    return type(DEFAULTS[key])(num)
+
 
 class LiveTrader:
     def __init__(self, symbol="btcusdt", **cfg):
@@ -82,6 +214,8 @@ class LiveTrader:
         self._streak_side = 0
         self._streak = 0
         self._last_close = 0.0
+        self._seen = None
+        self.last_error = None
         self.peak_equity = self.cfg["capital"]
         self.max_dd = 0.0
 
@@ -114,10 +248,10 @@ class LiveTrader:
         self.save()
 
     def configure(self, **kw):
+        """Change settings. All-or-nothing: one bad value changes nothing."""
+        clean = {k: validate(k, v) for k, v in kw.items() if v is not None}
         with self.lock:
-            for k, v in kw.items():
-                if k in self.cfg and v is not None:
-                    self.cfg[k] = type(self.cfg[k])(v)
+            self.cfg.update(clean)
 
     # ---------- engine ----------
     def _price(self):
@@ -131,42 +265,8 @@ class LiveTrader:
         return None
 
     def _observe(self):
-        """Build observations from the live book and tape."""
-        st = self.feed.status()
-        obs = []
-        bi = st.get("imbalance") or 0.0
-        if abs(bi) > 0.1:
-            obs.append(decision.Observation(
-                "book_imbalance", 1 if bi > 0 else -1,
-                decision.WEIGHTS["book_imbalance"] * min(abs(bi), 1.0),
-                f"book {bi:+.2f}", "book"))
-
-        for e in self.feed.recent_events(12):
-            side = 1 if e.get("side") == 0 else -1
-            kind = e.get("kind")
-            if kind == "wall":
-                obs.append(decision.Observation("wall_ahead", side,
-                    decision.WEIGHTS["wall_ahead"], f"wall @ {e.get('price')}", "book"))
-            elif kind == "pulled":
-                obs.append(decision.Observation("wall_pulled", -side,
-                    decision.WEIGHTS["wall_pulled"], f"pulled @ {e.get('price')}", "book"))
-            elif kind == "iceberg":
-                obs.append(decision.Observation("iceberg", side,
-                    decision.WEIGHTS["iceberg"], f"iceberg @ {e.get('price')}", "book"))
-
-        tape = self.feed.tape_stats(400) or {}
-        imb = tape.get("imbalance")
-        if imb is not None and abs(imb) > 0.12:
-            obs.append(decision.Observation("tape_imbalance", 1 if imb > 0 else -1,
-                0.4 * min(abs(imb), 1.0), f"tape {imb:+.2f}", "tape"))
-
-        for s in self.feed.sweeps()[:2]:
-            obs.append(decision.Observation("sweep", 1 if s["side"] == "BUY" else -1,
-                decision.WEIGHTS["sweep"], f"sweep {s['side']} / {s['levels']} lvls", "tape"))
-
-        for t in self.feed.large()[:3]:
-            obs.append(decision.Observation("large_print", 1 if t["side"] == "BUY" else -1,
-                decision.WEIGHTS["large_print"], f"large {t['side']} x{t['multiple']}", "tape"))
+        """Observations for this tick; one-off events count once."""
+        obs, self._seen = observe(self.feed, self._seen)
         return obs
 
     def next_notional(self):
@@ -210,7 +310,7 @@ class LiveTrader:
         self.trades.appendleft({
             "opened": p["opened"], "closed": time.time(),
             "side": "LONG" if p["side"] > 0 else "SHORT",
-            "entry": round(p["entry"], 2), "exit": round(price, 2),
+            "entry": _px(p["entry"]), "exit": _px(price),
             "qty": round(p["qty"], 6), "notional": round(p["notional"], 2),
             "pct": round((price - p["entry"]) / p["entry"] * p["side"] * 100, 3),
             "gross": round(gross, 2),
@@ -231,12 +331,14 @@ class LiveTrader:
         while self.running:
             try:
                 self._tick()
+                self.last_error = None
                 now = time.time()
                 if now - last_save >= 30:
                     last_save = now
                     self.save()
-            except Exception:  # noqa: BLE001 - a demo must not die on one bad tick
-                pass
+            except Exception as exc:  # noqa: BLE001 - a demo must not die on one bad tick
+                # ...but it must not fail silently either: show it in the UI.
+                self.last_error = f"{type(exc).__name__}: {exc}"
             time.sleep(1.0)
         self.save()
 
@@ -358,7 +460,10 @@ class LiveTrader:
                           "compound", "max_notional"}
             for k, v in (d.get("cfg") or {}).items():
                 if k in self.cfg and k in USER_OWNED:
-                    self.cfg[k] = v
+                    try:
+                        self.cfg[k] = validate(k, v)
+                    except (TypeError, ValueError):
+                        pass        # a hand-edited file keeps the default
             # An open position is deliberately NOT restored: while the server
             # was down nobody was watching the stop, so carrying it over would
             # invent a result that never happened.
@@ -375,11 +480,11 @@ class LiveTrader:
             if p:
                 pos = {
                     "side": "LONG" if p["side"] > 0 else "SHORT",
-                    "entry": round(p["entry"], 2),
-                    "price": round(price, 2) if price else None,
+                    "entry": _px(p["entry"]),
+                    "price": _px(price) if price else None,
                     "qty": round(p["qty"], 6),
                     "notional": round(p["notional"], 2),
-                    "liq": round(p["liq"], 2),
+                    "liq": _px(p["liq"]),
                     "pct": round((price - p["entry"]) / p["entry"] * p["side"] * 100, 3) if price else 0,
                     "unreal": round(unreal, 2),
                     "held_s": int(time.time() - p["opened"]),
@@ -413,6 +518,7 @@ class LiveTrader:
                 "max_drawdown_pct": round(self.max_dd / max(self.peak_equity, 1e-9) * 100, 2),
                 "compound": bool(self.cfg["compound"]),
                 "streak": self._streak,
+                "error": self.last_error,
                 "cooldown_left": max(0, int(self.cfg["cooldown_s"]
                                             - (time.time() - self._last_close))),
                 "journal": self.journal.stats(),

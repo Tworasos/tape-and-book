@@ -119,16 +119,40 @@ Instead there is a measurement loop:
 3. `learn.py` counts how often each observation type was right
 4. the weight follows that measurement, not anyone's intuition
 
-Four guards keep it from fooling itself:
+What goes into a journal row matters as much as how it is scored. The row is
+taken once a second, and observations come in two kinds:
+
+- **state** — book imbalance, walls standing right now, tape imbalance — read
+  fresh every second
+- **events** — a wall pulled, an iceberg, a sweep, a large print — recorded
+  **once**, in the first row after they happened, not in every row while they
+  remain in a rolling window
+
+Seven guards keep it from fooling itself:
 
 | Guard | Prevents |
 |---|---|
+| each event counted once | one large print becoming hundreds of "samples" |
+| one vote per feature per row | three walls in one moment counting as three outcomes |
+| flat outcomes not scored | "price did not move" counting as a miss for every feature |
 | minimum 40 samples | a feature seen a handful of times moving a weight |
 | Wilson lower bound | 3 hits out of 3 outranking 600 out of 1000 |
 | 70/30 train–test split | fitting noise — disagreement cuts the weight to 40% |
 | shrinkage (35% per update) | one strange day flipping the bot |
 
+The book reader has its own guards: a top-20 snapshot shows only a window of
+the book, so a wall that scrolls out of view as price moves away is not
+reported as pulled, and one that price traded through was consumed, not
+pulled. Icebergs are read at the touch — the best level emptying and refilling
+at the same price.
+
 Weights persist to `data/weights.json` and reload at startup.
+
+Journal rows carry a format version (`"v": 2`). Rows written before it
+duplicated event observations — a wall could appear three times per snapshot,
+a large print stayed in every row for minutes — so event-feature counts from
+them are inflated. The `/learn` page says how many such rows it is reading;
+delete `data/journal/` to measure from a clean slate.
 
 **What this cannot do:** it measures whether *existing* observations have an
 edge. It will not invent new ones. If nothing clears 50% out-of-sample, the
@@ -202,6 +226,18 @@ python src/server.py
 
 The browser opens at `/live`. Depth starts streaming immediately; the liquidity
 heatmap builds from one snapshot per second, so give it a minute to fill.
+
+### Tests
+
+```bash
+pip install pytest
+python -m pytest -q
+```
+
+No network needed: live feeds are driven with synthetic Binance messages. The
+server tests replay the attacks listed under **Security** against the real
+handler. CI runs the suite on Python 3.10 and 3.13 and syntax-checks every
+script the pages load.
 
 ### Offline tools
 

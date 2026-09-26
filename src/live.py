@@ -40,6 +40,7 @@ class LiveFeed:
         self.depth_levels = depth_levels
         self.snapshot_ms = snapshot_ms
         self.book = bookmod.Book(tick_size)
+        self.detector = bookmod.EventDetector(tick_size)
         self.snaps = deque(maxlen=history)
         self.trades = deque(maxlen=6000)
         self.cvd = 0.0
@@ -53,6 +54,10 @@ class LiveFeed:
         self._thread = None
         self._last_snap = 0.0
         self._tick_checked = False
+        # Sequence numbers let a consumer ask "what is new since I last looked",
+        # so a one-off event is counted once rather than once per poll.
+        self._snap_seq = 0
+        self._trade_seq = 0
 
     # ---------- lifecycle ----------
     def start(self):
@@ -97,7 +102,7 @@ class LiveFeed:
                     self.error = f"{type(exc).__name__}: {exc}"
                     if not self.running:
                         break
-                    time.sleep(min(backoff, 20))
+                    await asyncio.sleep(min(backoff, 20))
                     backoff *= 2
             self.connected = False
 
@@ -111,9 +116,9 @@ class LiveFeed:
 
         if "depth" in stream:
             ts_us = int(data.get("E", now * 1000)) * 1000
-            if not self._tick_checked:
-                self._refine_tick(data)
             with self.lock:
+                if not self._tick_checked:
+                    self._refine_tick(data)
                 # depth20 is a full top-20 snapshot, so rebuild rather than patch
                 self.book.bids.clear()
                 self.book.asks.clear()
@@ -129,11 +134,14 @@ class LiveFeed:
                 if (now - self._last_snap) * 1000 >= self.snapshot_ms:
                     self._last_snap = now
                     b, a = self.book.depth(self.depth_levels)
-                    self.snaps.append({"ts": ts_us, "bids": b, "asks": a})
-                    if len(self.snaps) >= 3:
-                        found = bookmod.detect_events(list(self.snaps)[-3:], self.tick_size)
-                        for e in found:
-                            self.events.append(e)
+                    snap = {"ts": ts_us, "bids": b, "asks": a}
+                    self.snaps.append(snap)
+                    self._snap_seq += 1
+                    # Each snapshot is read once. Re-scanning a sliding window
+                    # here reported every wall up to three times.
+                    for e in self.detector.update(snap):
+                        e["snap"] = self._snap_seq
+                        self.events.append(e)
 
         elif "@trade" in stream or data.get("e") in ("trade", "aggTrade"):
             with self.lock:
@@ -141,7 +149,9 @@ class LiveFeed:
                 # Binance 'm' = buyer was the maker, so the aggressor sold
                 sell = bool(data.get("m"))
                 self.cvd += -qty if sell else qty
+                self._trade_seq += 1
                 self.trades.append({
+                    "seq": self._trade_seq,
                     "ts": int(data.get("T", now * 1000)),
                     "price": float(data.get("p", 0)),
                     "qty": qty,
@@ -154,7 +164,8 @@ class LiveFeed:
         """Derive the real tick size from consecutive book levels.
 
         A wrong tick collapses every price into one heatmap row, so this runs
-        before the first snapshot is taken.
+        before the first snapshot is taken. Caller holds the lock: readers must
+        never see the book swapped out halfway through.
         """
         px = []
         for side in ("b", "a"):
@@ -173,6 +184,7 @@ class LiveFeed:
         if tick > 0 and abs(tick - self.tick_size) / max(tick, 1e-12) > 0.01:
             self.tick_size = tick
             self.book = bookmod.Book(tick)
+            self.detector = bookmod.EventDetector(tick)
             self.snaps.clear()
             self.events.clear()
         self._tick_checked = True
@@ -216,6 +228,26 @@ class LiveFeed:
     def recent_events(self, n=40):
         with self.lock:
             return list(self.events)[-n:][::-1]
+
+    def book_events(self, after_snap=None):
+        """Events newer than snapshot `after_snap`, newest first.
+
+        Always includes the latest snapshot, so state such as standing walls is
+        visible even when nothing new arrived. Returns (latest_snap, events).
+        """
+        with self.lock:
+            latest = self._snap_seq
+            floor = latest - 1 if after_snap is None else min(after_snap, latest - 1)
+            out = []
+            for e in reversed(self.events):
+                if e.get("snap", 0) <= floor:
+                    break
+                out.append(e)
+        return latest, out
+
+    def last_trade(self):
+        with self.lock:
+            return self.trades[-1] if self.trades else None
 
 
 _FEEDS = {}
@@ -266,16 +298,16 @@ if __name__ == "__main__":
     import sys
     sym = sys.argv[1] if len(sys.argv) > 1 else "btcusdt"
     f = get_feed(sym)
-    print(f"lacze z Binance: {sym} ... (Ctrl+C konczy)")
+    print(f"connecting to Binance: {sym} ... (Ctrl+C to stop)")
     try:
         for _ in range(12):
             time.sleep(2)
             s = f.status()
-            print(f"  polaczony={s['connected']} wiadomosci={s['messages']:>6} "
-                  f"migawek={s['snapshots']:>4} bid={s['best_bid']} ask={s['best_ask']} "
-                  f"imb={s['imbalance']:+.3f} zdarzen={s['events']}")
+            print(f"  connected={s['connected']} messages={s['messages']:>6} "
+                  f"snapshots={s['snapshots']:>4} bid={s['best_bid']} ask={s['best_ask']} "
+                  f"imb={s['imbalance']:+.3f} events={s['events']}")
             if s["error"]:
-                print(f"  blad: {s['error']}")
+                print(f"  error: {s['error']}")
     except KeyboardInterrupt:
         pass
     f.stop()
@@ -362,6 +394,9 @@ def _live_sweeps(trades, window_ms=400, min_levels=3, top=25):
             if len(sides) == 1 and len(prices) >= min_levels:
                 out.append({
                     "ts": seg[0]["ts"],
+                    "ts_end": seg[-1]["ts"],
+                    "seq_from": seg[0].get("seq", 0),
+                    "seq_to": seg[-1].get("seq", 0),
                     "side": seg[0]["side"],
                     "levels": len(prices),
                     "volume": round(sum(t["qty"] for t in seg), 4),

@@ -4,6 +4,10 @@
 const $ = (id) => document.getElementById(id);
 const S = { symbol: 'btcusdt', heat: null, dom: null, foot: null, cvd: null, bot: null, tick: 0.1 };
 
+/* Decimals that show one tick. A fixed 1 decimal rendered every DOGE or XRP
+   price as the same number. */
+const tickDp = (tick) => Math.min(8, Math.max(0, Math.ceil(-Math.log10(tick || 0.1) - 1e-9)));
+
 const fmt = (n, d = 2) =>
   n === null || n === undefined || Number.isNaN(n) ? '—'
     : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -70,7 +74,7 @@ function drawHeat() {
   const { ctx, w, h } = prep($('heatC'));
   const d = S.heat;
   if (!d || !d.cells || !d.cells.length) {
-    return note(ctx, w, h, 'collecting depth…\nheatmap buduje sie z migawek ksiegi what sekunde');
+    return note(ctx, w, h, 'collecting depth…\nthe heatmap builds from one book snapshot per second');
   }
   const nc = d.cols.length, nr = d.rows.length;
   const padR = 62;
@@ -100,7 +104,7 @@ function drawHeat() {
   for (let r = 0; r < nr; r += step) {
     const y = h - (r + 0.5) * ch;
     if (y < 8 || y > h - 2) continue;
-    ctx.fillText(fmt(d.rows[r], 1), w - padR + 4, y + 3);
+    ctx.fillText(fmt(d.rows[r], tickDp(S.tick)), w - padR + 4, y + 3);
   }
 }
 
@@ -126,7 +130,7 @@ function drawDom() {
     ctx.fillRect(w - 84 - bw, y, bw, rh - 1);
     ctx.fillStyle = colour.replace('ALPHA', '1');
     ctx.textAlign = 'left';
-    ctx.fillText(fmt(item.price, 1), 4, y + rh / 2);
+    ctx.fillText(fmt(item.price, tickDp(S.tick)), 4, y + rh / 2);
     ctx.fillStyle = '#93a3b8';
     ctx.textAlign = 'right';
     ctx.fillText(fmt(item.size, 2), w - 4, y + rh / 2);
@@ -140,7 +144,7 @@ function drawDom() {
   ctx.fillRect(0, y, w, rh);
   ctx.fillStyle = '#e0a33e';
   ctx.textAlign = 'center';
-  ctx.fillText(spread !== null ? `spread ${fmt(spread, 2)}` : '—', w / 2, y + rh / 2);
+  ctx.fillText(spread !== null ? `spread ${fmt(spread, tickDp(S.tick))}` : '—', w / 2, y + rh / 2);
   y += rh;
 
   bids.forEach((b) => row(b, 'rgba(38,166,154,ALPHA)'));
@@ -176,7 +180,7 @@ function drawFoot() {
     }
     ctx.fillStyle = '#93a3b8';
     ctx.textAlign = 'right';
-    ctx.fillText(fmt(L.price, d.tick_size < 0.01 ? 4 : 1), w - 2, y);
+    ctx.fillText(fmt(L.price, tickDp(d.tick_size)), w - 2, y);
   });
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
@@ -243,11 +247,11 @@ function renderDecision(d) {
         <span class="src ${o.source === 'book' ? 'book' : ''}">${esc(o.source)}</span>
         <span class="d">${esc(o.detail)}</span>
       </div>`).join('')
-    : '<div class="empty">Brak obserwacji.<br>Czekam na dane z ksiegi.</div>';
+    : '<div class="empty">No observations yet.<br>Waiting for book data.</div>';
 
   $('deciMode').textContent = d.has_book ? 'reading book' : 'tape only';
   $('deciNote').textContent = d.has_book
-    ? 'Note: this is BTCUSDT on Binance, not Nasdaq. The same engine handles NQ once CME data is connected.'
+    ? `Note: this is ${S.symbol.toUpperCase()} on Binance, not Nasdaq. The same engine handles NQ once CME data is connected.`
     : 'Book unavailable — decision rests on the tape alone.';
 }
 
@@ -261,15 +265,15 @@ function renderTrades(list) {
     list.slice(0, 50).map((t) => `<tr>
       <td>${hms(t.ts)}</td>
       <td class="${t.side === 'BUY' ? 'buy' : 'sell'}">${t.side}</td>
-      <td>${fmt(t.price, 1)}</td><td>${fmt(t.qty, 3)}</td></tr>`).join('')}</tbody></table>`;
+      <td>${fmt(t.price, tickDp(S.tick))}</td><td>${fmt(t.qty, 3)}</td></tr>`).join('')}</tbody></table>`;
 }
 
-const EV_PL = { wall: 'wall', pulled: 'wycofana', stacked: 'stacked', iceberg: 'iceberg', void: 'gap' };
+const EV_LABEL = { wall: 'wall', pulled: 'pulled', stacked: 'stacked', iceberg: 'iceberg', void: 'gap' };
 
 function renderBook(events, large, sweeps) {
   const el = $('evBody');
   const rows = [];
-  const dp = S.tick < 0.001 ? 5 : S.tick < 0.01 ? 4 : 1;
+  const dp = tickDp(S.tick);
 
   for (const s of (sweeps || []).slice(0, 8)) {
     rows.push(`<tr><td class="${s.side === 'BUY' ? 'buy' : 'sell'}">SWEEP ${s.side}</td>
@@ -280,7 +284,7 @@ function renderBook(events, large, sweeps) {
       <td>x${t.multiple}</td><td>${fmt(t.price, dp)}</td><td>${fmt(t.qty, 3)}</td></tr>`);
   }
   for (const e of (events || []).slice(0, 30)) {
-    rows.push(`<tr><td>${esc(EV_PL[e.kind] || e.kind)}</td>
+    rows.push(`<tr><td>${esc(EV_LABEL[e.kind] || e.kind)}</td>
       <td class="${e.side === 0 ? 'buy' : 'sell'}">${e.side === 0 ? 'BID' : 'ASK'}</td>
       <td>${fmt(e.price, dp)}</td><td>${fmt(e.size, 2)}</td></tr>`);
   }
@@ -289,12 +293,12 @@ function renderBook(events, large, sweeps) {
   for (const e of (events || [])) counts[e.kind] = (counts[e.kind] || 0) + 1;
   $('evInfo').textContent = [
     (sweeps || []).length ? `sweeps:${sweeps.length}` : '',
-    (large || []).length ? `duze:${large.length}` : '',
-    ...Object.entries(counts).map(([k, v]) => `${EV_PL[k] || k}:${v}`),
+    (large || []).length ? `large:${large.length}` : '',
+    ...Object.entries(counts).map(([k, v]) => `${EV_LABEL[k] || k}:${v}`),
   ].filter(Boolean).join(' ');
 
   el.innerHTML = rows.length
-    ? `<table><thead><tr><th>what</th><th>side</th><th>price</th><th>size</th></tr></thead><tbody>${rows.join('')}</tbody></table>`
+    ? `<table><thead><tr><th>event</th><th>side</th><th>price</th><th>size</th></tr></thead><tbody>${rows.join('')}</tbody></table>`
     : '<div class="empty">waiting for book events…</div>';
 }
 
@@ -302,14 +306,14 @@ function renderBook(events, large, sweeps) {
 /* ---------- bot demo ---------- */
 function renderBot(st) {
   if (!st) return;
-  const dp = S.tick < 0.001 ? 5 : S.tick < 0.01 ? 4 : 2;
+  const dp = tickDp(S.tick);
   $('botEq').textContent = fmt(st.equity_live, 2);
   $('botEq').className = st.pnl >= 0 ? 'up' : 'dn';
   $('botPnl').innerHTML = `<span class="${st.pnl >= 0 ? 'up' : 'dn'}">${st.pnl >= 0 ? '+' : ''}${fmt(st.pnl, 2)} USD (${st.pnl_pct >= 0 ? '+' : ''}${fmt(st.pnl_pct, 2)}%)</span>`;
   $('botLeft').textContent = `${st.trades_left} entries today`;
-  $('botMode').textContent = `${st.config.leverage}x · ${st.compound ? 'compound' : 'staly'}`;
+  $('botMode').textContent = `${st.config.leverage}x · ${st.compound ? 'compound' : 'fixed size'}`;
 
-  // Next position size: this is what "wchodzi za te 1200" looks like in numbers.
+  // Size of the next entry: with compounding it follows equity up and down.
   $('botNext').textContent = fmt(st.next_notional, 0) + ' USD';
   $('botPeak').textContent = fmt(st.peak_equity, 2);
   const dd = st.max_drawdown || 0;
@@ -336,9 +340,11 @@ function renderBot(st) {
 
   $('botToggle').textContent = st.running ? 'pause' : 'resume';
   $('botCosts').textContent = st.costs_on ? 'disable fees' : 'enable fees';
-  $('botNote').textContent = st.costs_on
-    ? 'Koszty wlaczone (10 bps na runde) — score realistyczny.'
-    : 'Koszty WYLACZONE — score zawyzony, to test mechaniki.';
+  $('botNote').textContent = st.error
+    ? `Bot error: ${st.error}`
+    : st.costs_on
+      ? `Fees on (${st.config.fee_bps} bps per side) — P&L is realistic.`
+      : 'Fees OFF — P&L is flattered; this tests the mechanics only.';
 }
 
 function renderBotTrades(list) {
@@ -347,14 +353,12 @@ function renderBotTrades(list) {
     el.innerHTML = '<div class="empty">no closed positions</div>';
     return;
   }
-  const dp = S.tick < 0.01 ? 4 : 2;
-  el.innerHTML = `<table><thead><tr><th>side</th><th>%</th><th>netto</th><th>powod</th></tr></thead><tbody>${
+  el.innerHTML = `<table><thead><tr><th>side</th><th>%</th><th>net</th><th>reason</th></tr></thead><tbody>${
     list.slice(0, 40).map((t) => `<tr>
       <td class="${t.side === 'LONG' ? 'buy' : 'sell'}">${t.side}</td>
       <td class="${t.pct >= 0 ? 'buy' : 'sell'}">${fmt(t.pct, 2)}</td>
       <td class="${t.net >= 0 ? 'buy' : 'sell'}">${t.net >= 0 ? '+' : ''}${fmt(t.net, 2)}</td>
       <td style="font-size:10px">${esc(t.reason)}</td></tr>`).join('')}</tbody></table>`;
-  void dp;
 }
 
 async function botAction(what, params) {
@@ -379,16 +383,18 @@ async function tick() {
     const all = await api('/api/live/all', { levels: 14 });
     const st = all.status, dom = all.dom, dec = all.decision, tape = all.tape;
     const foot = all.footprint;
+    // /api/live/all carries large prints and sweeps as plain arrays. Reading
+    // them as {trades}/{sweeps} objects left both panels permanently empty.
     const tr = { trades: all.trades }, ev = { events: all.events };
-    const large = { trades: all.large.trades }, sw = { sweeps: all.sweeps.sweeps };
+    const large = { trades: all.large }, sw = { sweeps: all.sweeps };
 
     $('dot').className = 'dot' + (st.connected ? ' on' : '');
     $('conn').textContent = st.connected ? 'connected' : (st.error ? 'error' : 'connecting…');
     S.tick = st.tick_size || 0.1;
-    const dp = S.tick < 0.001 ? 5 : S.tick < 0.01 ? 4 : S.tick < 1 ? 2 : 1;
+    const dp = tickDp(S.tick);
     $('sBid').textContent = fmt(st.best_bid, dp);
     $('sAsk').textContent = fmt(st.best_ask, dp);
-    $('sMicro').textContent = fmt(st.microprice, dp);
+    $('sMicro').textContent = fmt(st.microprice, dp + 1);   // sub-tick by construction
     $('sImb').textContent = (st.imbalance >= 0 ? '+' : '') + fmt(st.imbalance, 3);
     $('sImb').className = st.imbalance >= 0 ? 'up' : 'dn';
     $('sTick').textContent = S.tick;
@@ -416,7 +422,7 @@ async function tickSlow() {
     S.heat = heat; S.cvd = cvd;
     $('sCvd').textContent = (cvd.cvd >= 0 ? '+' : '') + fmt(cvd.cvd, 3);
     $('sCvd').className = cvd.cvd >= 0 ? 'up' : 'dn';
-    $('cvdInfo').textContent = `${(cvd.points || []).length} pkt`;
+    $('cvdInfo').textContent = `${(cvd.points || []).length} pts`;
     drawHeat(); drawCvd();
   } catch (e) { console.error(e); }
 }

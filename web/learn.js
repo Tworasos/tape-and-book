@@ -2,7 +2,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const S = { symbol: 'btcusdt', horizon: '120' };
+const S = { symbol: 'btcusdt', horizon: '30' };
 
 const fmt = (n, d = 1) =>
   n === null || n === undefined || Number.isNaN(n) ? '—'
@@ -78,7 +78,7 @@ function renderTable(props) {
         : `<span class="dn">${fmt(p.old, 2)} → ${fmt(p.new, 2)} ↓</span>`;
     return `<tr>
       <td>${esc(p.name)} <span class="src ${p.source === 'book' ? 'book' : ''}">${esc(p.source)}</span></td>
-      <td>${fmt(p.samples, 0)}</td>
+      <td title="${fmt(p.decided, 0)} with a price move · ${fmt(p.flat, 0)} flat (not scored)">${fmt(p.samples, 0)}</td>
       <td class="${dir}"><span class="bar"><i style="width:${Math.max(0, Math.min(100, p.hit_rate))}%"></i></span>${fmt(p.hit_rate)}%</td>
       <td class="${dir}">${fmt(p.hit_lower)}%</td>
       <td>${oos}</td>
@@ -114,9 +114,10 @@ async function refresh() {
     }
     renderCards(rep, props);
     renderTable(props);
-    $('status').textContent = `${fmt(rep.rows, 0)} observations · horizon ${rep.horizon_s}s`;
+    $('status').textContent = `${fmt(rep.rows, 0)} observations · horizon ${rep.horizon_s}s`
+      + (rep.legacy_rows ? ` · ${fmt(rep.legacy_rows, 0)} rows predate event de-duplication` : '');
   } catch (e) {
-    $('status').textContent = 'blad: ' + e.message;
+    $('status').textContent = 'error: ' + e.message;
   }
 }
 
@@ -135,12 +136,13 @@ $('btnRefresh').addEventListener('click', refresh);
 $('btnApply').addEventListener('click', async () => {
   $('status').textContent = 'applying…';
   try {
-    const r = await post('/api/learn/apply');
+    // Send the horizon on screen, so what gets applied is what was shown.
+    const r = await post('/api/learn/apply', { horizon: S.horizon });
     $('status').textContent = r.count
       ? `applied ${r.count} weights — the bot uses them immediately`
       : 'no weights to change (not enough data)';
     refresh();
-  } catch (e) { $('status').textContent = 'blad: ' + e.message; }
+  } catch (e) { $('status').textContent = 'error: ' + e.message; }
 });
 
 loadSymbols();

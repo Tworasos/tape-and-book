@@ -40,6 +40,7 @@ WEIGHTS = {
     "iceberg": 0.65,         # someone working a big order quietly
     "sweep": 0.70,           # aggressor paying through several levels
     "large_print": 0.45,     # single oversized trade
+    "tape_imbalance": 0.40,  # aggressors lopsided over the recent prints
     "cvd_divergence": 0.60,  # price and cumulative delta disagree
     "delta_divergence": 0.40,
     "vwap_side": 0.30,       # context, not a trigger
@@ -54,6 +55,10 @@ BOOK_SOURCED = {"book_imbalance", "wall_ahead", "wall_pulled", "iceberg", "ofi"}
 #   book_imbalance  52.9% lower bound, 53.9% out-of-sample, rising
 #                   monotonically with strength to 57.6% when |imb| > 0.8
 #   everything else 49-51%, i.e. indistinguishable from a coin flip
+# Caveat: those runs counted a flat outcome as a miss, and the event features
+# (walls, pulls, sweeps, large prints) were duplicated and stale in the journal
+# at the time. Book imbalance was read fresh each second and is the least
+# affected; the rest need re-measuring on journal rows with "v": 2.
 # Update this set from the /learn report as evidence accumulates.
 CONFIRMED = {"book_imbalance"}
 
@@ -102,7 +107,8 @@ def read(bars, i, ctx=None):
                                "bar closed against its own delta"))
 
     if abs(imb) > 0.15:
-        obs.append(Observation("tape_imbalance", np.sign(imb), 0.35 * min(abs(imb), 1.0),
+        obs.append(Observation("tape_imbalance", np.sign(imb),
+                               WEIGHTS["tape_imbalance"] * min(abs(imb), 1.0),
                                f"aggressor edge {imb:+.2f}"))
 
     obs.append(Observation("vwap_side", 1 if close > vwap else -1, WEIGHTS["vwap_side"],

@@ -254,15 +254,15 @@ if __name__ == "__main__":
     bars["cvd_div"] = of.cvd_divergence(bars)
     r = run(bars)
 
-    print(f"\n  {sym} {tf} — paper trading na {r['config']['contract']}")
+    print(f"\n  {sym} {tf} — paper trading on {r['config']['contract']}")
     print("  " + "-" * 52)
     s = r["stats"]
     if not s.get("trades"):
-        print("  " + s.get("note", "brak wynikow"))
+        print("  " + s.get("note", "no results"))
     else:
         for k, v in s.items():
             print(f"  {k:>16}: {v}")
-        print("\n  ostatnie transakcje:")
+        print("\n  last trades:")
         for t in r["trades"][-6:]:
             print(f"    {t['side']:<5} {t['entry']:>10.2f} -> {t['exit']:>10.2f}  "
                   f"{t['ticks']:>6.1f}t  {t['net']:>8.2f} USD  {t['reason']}")
