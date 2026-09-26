@@ -78,6 +78,25 @@ STATIC = {
 _limiter = security.RateLimiter()
 
 
+def qint(q, key, default, lo, hi):
+    """Integer query parameter, clamped. Garbage falls back to the default."""
+    try:
+        v = int(q.get(key, default))
+    except (TypeError, ValueError):
+        v = default
+    return max(lo, min(hi, v))
+
+
+def qfloat(q, key, default, lo, hi):
+    try:
+        v = float(q.get(key, default))
+    except (TypeError, ValueError):
+        v = default
+    if v != v:                      # NaN
+        v = default
+    return max(lo, min(hi, v))
+
+
 # --------------------------------------------------------------------------
 # file discovery
 # --------------------------------------------------------------------------
@@ -230,8 +249,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self._guard_mutation():
             return
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(min(length, 65536)) if length else b"{}"
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if not 0 <= length <= 65536:
+            # Refuse rather than read a partial body: the rest would be left in
+            # the keep-alive stream and parsed as the next request.
+            self.close_connection = True
+            self._json({"error": "bad Content-Length"}, 413 if length > 0 else 400)
+            return
+        raw = self.rfile.read(length) if length else b"{}"
         try:
             payload = json.loads(raw.decode("utf-8") or "{}")
         except (ValueError, UnicodeDecodeError):
@@ -240,6 +268,8 @@ class Handler(BaseHTTPRequestHandler):
             payload = {}
         try:
             self._mutate(u.path, payload)
+        except ValueError as exc:
+            self._json({"error": str(exc)}, 400)
         except Exception as exc:  # noqa: BLE001 - report, never crash the loop
             self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
 
@@ -263,6 +293,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not target:
                     return self._send("bad path", "text/plain; charset=utf-8", 400)
                 return self._file(target, "application/javascript; charset=utf-8")
+            if route == "/favicon.ico":
+                # No icon; answer empty so every page load is not a console error.
+                return self._send(b"", "image/x-icon", 204)
             if route == "/api/session":
                 # The page reads this once and echoes the token back on writes.
                 return self._json({"token": security.SESSION_TOKEN, "port": PORT})
@@ -274,7 +307,12 @@ class Handler(BaseHTTPRequestHandler):
     def _mutate(self, route, payload):
         symbol = str(payload.get("symbol", "btcusdt"))
         if route == "/api/learn/apply":
-            proposals = learnmod.propose_weights(symbol)["proposals"]
+            # Apply exactly what the user is looking at. The page defaulted to
+            # the 120 s view while this applied 30 s proposals.
+            horizon = str(payload.get("horizon", learnmod.BASE_HORIZON))
+            if horizon not in {str(h) for h in journalmod.HORIZONS}:
+                raise ValueError(f"unknown horizon: {horizon}")
+            proposals = learnmod.propose_weights(symbol, horizon=horizon)["proposals"]
             return self._json(learnmod.apply_weights(proposals))
 
         tr = tradermod.get_trader(symbol)
@@ -306,9 +344,9 @@ class Handler(BaseHTTPRequestHandler):
             readers = {
                 "status": feed.status,
                 "heatmap": feed.heatmap,
-                "trades": lambda: {"trades": feed.recent_trades(int(q.get("n", 60)))},
-                "events": lambda: {"events": feed.recent_events(int(q.get("n", 40)))},
-                "dom": lambda: feed.dom(int(q.get("levels", 20))),
+                "trades": lambda: {"trades": feed.recent_trades(qint(q, "n", 60, 1, 6000))},
+                "events": lambda: {"events": feed.recent_events(qint(q, "n", 40, 1, 400))},
+                "dom": lambda: feed.dom(qint(q, "levels", 20, 1, 100)),
                 "tape": lambda: feed.tape_stats() or {},
                 "footprint": feed.footprint,
                 "large": lambda: {"trades": feed.large()},
@@ -320,7 +358,7 @@ class Handler(BaseHTTPRequestHandler):
                 # second; separate calls were both slower and self-throttling.
                 return self._json({
                     "status": feed.status(),
-                    "dom": feed.dom(int(q.get("levels", 14))),
+                    "dom": feed.dom(qint(q, "levels", 14, 1, 100)),
                     "trades": feed.recent_trades(60),
                     "events": feed.recent_events(40),
                     "tape": feed.tape_stats() or {},
@@ -341,7 +379,7 @@ class Handler(BaseHTTPRequestHandler):
             if what == "state":
                 return self._json(tr.state())
             if what == "history":
-                return self._json({"trades": tr.history(int(q.get("n", 60)))})
+                return self._json({"trades": tr.history(qint(q, "n", 60, 1, 300))})
             if what == "curve":
                 return self._json(tr.equity_curve())
             return self._send("not found", "text/plain; charset=utf-8", 404)
@@ -349,10 +387,13 @@ class Handler(BaseHTTPRequestHandler):
         if route.startswith("/api/learn/"):
             what = route[len("/api/learn/"):]
             if what == "report":
+                horizon = q.get("horizon", learnmod.BASE_HORIZON)
+                if horizon not in {str(h) for h in journalmod.HORIZONS}:
+                    return self._json({"error": f"unknown horizon: {horizon}"}, 400)
                 return self._json(learnmod.propose_weights(
                     q.get("symbol", "btcusdt"),
-                    days=int(q.get("days", 7)),
-                    horizon=q.get("horizon", learnmod.BASE_HORIZON)))
+                    days=qint(q, "days", 7, 1, 365),
+                    horizon=horizon))
             if what == "weights":
                 return self._json({"weights": dict(decision.WEIGHTS)})
             return self._send("not found", "text/plain; charset=utf-8", 404)
@@ -372,17 +413,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(out)
         if route == "/api/footprint":
             return self._json(of.footprint(tape(path), tf,
-                                           max_bars=int(q.get("bars", 60)),
-                                           imbalance_ratio=float(q.get("ratio", 3.0))))
+                                           max_bars=qint(q, "bars", 60, 1, 500),
+                                           imbalance_ratio=qfloat(q, "ratio", 3.0, 1.0, 100.0)))
         if route == "/api/heatmap":
             return self._json(of.heatmap(tape(path), tf,
-                                         max_cols=int(q.get("cols", 320)),
-                                         max_rows=int(q.get("rows", 200))))
+                                         max_cols=qint(q, "cols", 320, 1, 2000),
+                                         max_rows=qint(q, "rows", 200, 1, 1000)))
         if route == "/api/large":
-            return self._json(of.large_trades(tape(path), top=int(q.get("top", 200)),
-                                              percentile=float(q.get("pct", 99.0))))
+            return self._json(of.large_trades(tape(path), top=qint(q, "top", 200, 1, 5000),
+                                              percentile=qfloat(q, "pct", 99.0, 50.0, 100.0)))
         if route == "/api/sweeps":
-            return self._json(of.sweeps(tape(path), top=int(q.get("top", 150))))
+            return self._json(of.sweeps(tape(path), top=qint(q, "top", 150, 1, 5000)))
         if route == "/api/profile":
             return self._json(of.volume_profile(tape(path)))
         if route == "/api/summary":
@@ -392,36 +433,13 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _live_decision(feed):
-        st = feed.status()
-        obs = []
-        bi = st.get("imbalance") or 0.0
-        if abs(bi) > 0.1:
-            obs.append(decision.Observation(
-                "book_imbalance", 1 if bi > 0 else -1,
-                decision.WEIGHTS["book_imbalance"] * min(abs(bi), 1.0),
-                f"book tilted {bi:+.2f}", "book"))
-        for e in feed.recent_events(12):
-            side = 1 if e.get("side") == 0 else -1
-            kind = e.get("kind")
-            if kind == "wall":
-                obs.append(decision.Observation("wall_ahead", side,
-                    decision.WEIGHTS["wall_ahead"],
-                    f"wall {int(e.get('size', 0))} @ {e.get('price')}", "book"))
-            elif kind == "pulled":
-                obs.append(decision.Observation("wall_pulled", -side,
-                    decision.WEIGHTS["wall_pulled"], f"pulled @ {e.get('price')}", "book"))
-            elif kind == "iceberg":
-                obs.append(decision.Observation("iceberg", side,
-                    decision.WEIGHTS["iceberg"], f"iceberg @ {e.get('price')}", "book"))
-        recent = feed.recent_trades(40)
-        buys = sum(1 for t in recent if t["side"] == "BUY")
-        if recent:
-            tb = (buys - (len(recent) - buys)) / len(recent)
-            if abs(tb) > 0.15:
-                obs.append(decision.Observation("tape_imbalance", 1 if tb > 0 else -1,
-                    0.35 * min(abs(tb), 1.0),
-                    f"tape {buys}B/{len(recent) - buys}S", "tape"))
-        d = decision.decide(obs)
+        """The decision panel. Same observations, weights and threshold as the
+        bot - it used to run its own copy with a 0.9 threshold against the
+        bot's 4.5, so the panel said BUY while the bot, correctly, waited."""
+        obs, _ = tradermod.observe(feed)
+        tr = tradermod._TRADERS.get(feed.symbol)
+        threshold = (tr.cfg if tr else tradermod.DEFAULTS)["min_score"]
+        d = decision.decide(obs, threshold=threshold)
         d["explain"] = decision.explain(d)
         d["observations"] = obs
         return d

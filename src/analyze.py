@@ -101,7 +101,7 @@ def main():
     print("  WHAT THIS MEANS")
     print("  - CVD is the running difference between aggressive buying and selling.")
     print("    Rising = buyers pressing. Falling = sellers.")
-    print("  - Dywergencja to rozjazd prices i CVD. Cena rosnie, a CVD spada")
+    print("  - A divergence is price and CVD disagreeing. Price rising while CVD falls")
     print("    means a large seller is quietly filling the buyers.")
     print("  - This is data from your Sierra Chart install, not from Nasdaq.")
     print("    For NQ you need Databento data - see README.")

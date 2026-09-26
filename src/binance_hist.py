@@ -51,7 +51,7 @@ def _get(url, params, retries=3):
         except Exception as exc:  # noqa: BLE001 - transient network, retry
             last = exc
             time.sleep(1.5 * (attempt + 1))
-    raise RuntimeError(f"Binance REST nie odpowiada: {last}")
+    raise RuntimeError(f"Binance REST not responding: {last}")
 
 
 def fetch_klines(symbol="BTCUSDT", interval="5m", bars=1500, force=False):
@@ -82,7 +82,7 @@ def fetch_klines(symbol="BTCUSDT", interval="5m", bars=1500, force=False):
         time.sleep(0.25)          # stay well inside the public rate limit
 
     if not rows:
-        raise RuntimeError(f"Binance nie zwrocil danych dla {symbol} {interval}")
+        raise RuntimeError(f"Binance returned no data for {symbol} {interval}")
 
     arr = np.array([[float(x) for x in (r[0], r[1], r[2], r[3], r[4], r[5], r[9])]
                     for r in rows], dtype=float)
@@ -161,9 +161,9 @@ if __name__ == "__main__":
     sym = sys.argv[1] if len(sys.argv) > 1 else "BTCUSDT"
     iv = sys.argv[2] if len(sys.argv) > 2 else "5m"
     b = bars_from_klines(sym, iv, 1500)
-    print(f"  {sym} {iv}: {b['ts'].size} barow")
-    print(f"  zakres    : {b['ts'][0]} .. {b['ts'][-1]}")
-    print(f"  cena      : {b['close'].min():.2f} .. {b['close'].max():.2f}")
-    print(f"  delta     : suma {b['delta'].sum():+.2f}, |sr| {np.abs(b['delta']).mean():.2f}")
-    print(f"  imbalance : sr {np.abs(b['imbalance']).mean():.3f}  (yfinance dawal 1.000)")
+    print(f"  {sym} {iv}: {b['ts'].size} bars")
+    print(f"  range     : {b['ts'][0]} .. {b['ts'][-1]}")
+    print(f"  price     : {b['close'].min():.2f} .. {b['close'].max():.2f}")
+    print(f"  delta     : sum {b['delta'].sum():+.2f}, mean |d| {np.abs(b['delta']).mean():.2f}")
+    print(f"  imbalance : mean |i| {np.abs(b['imbalance']).mean():.3f}  (yfinance gave 1.000)")
     print(f"  CVD       : {b['cvd'][-1]:+.2f}")

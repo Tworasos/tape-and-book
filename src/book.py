@@ -29,6 +29,7 @@ Features produced for the algorithm:
 from __future__ import annotations
 
 import struct
+from collections import deque
 
 import numpy as np
 
@@ -249,64 +250,144 @@ def liquidity_heatmap(snaps, tick_size, max_rows=240):
     }
 
 
-def detect_events(snaps, tick_size, wall_sigma=3.0, iceberg_refills=3):
+class EventDetector:
     """Read the book for the algorithm: walls, pulling, stacking, icebergs, voids.
 
-    Returns a list of dicts, each with ts, price, kind and magnitude, so the
-    strategy layer can consume them as features without re-reading raw depth.
+    Fed one snapshot at a time, and each snapshot is read exactly once. The
+    live feed used to re-scan a sliding window of the last three snapshots
+    every second instead, which had two effects on the measurement loop:
+    every wall was reported up to three times, and icebergs - which need
+    memory across more than three snapshots - could never fire at all.
+
+    Walls are STATE: reported on every snapshot they stand in, the same way
+    book imbalance is sampled every second. Pulled, stacked and iceberg are
+    CHANGES between two snapshots.
+
+    An iceberg is read at the touch: the best bid or ask empties and comes back
+    at the same price, again and again. Deeper levels coming and going, or a
+    price that is crossed and later re-quoted, are not refills.
+
+    A top-N snapshot only shows a window of the book. A level that leaves that
+    window because price moved away has not been pulled - it is just out of
+    sight - and a level that price traded through was consumed, not pulled.
+    Only a level that vanished while still inside the visible range counts.
     """
-    if len(snaps) < 2:
-        return []
 
-    sizes = np.array([sz for s in snaps for _, sz in (s["bids"] + s["asks"])], dtype=float)
-    if sizes.size == 0:
-        return []
-    thresh = sizes.mean() + wall_sigma * sizes.std()
+    def __init__(self, tick_size, wall_sigma=3.0, iceberg_refills=3, window=3,
+                 memory=600):
+        self.tick = float(tick_size)
+        self.wall_sigma = wall_sigma
+        self.iceberg_refills = iceberg_refills
+        self.memory = memory               # snapshots a refill count survives
+        self._sizes = deque(maxlen=window)  # wall threshold: trailing snapshots only
+        self._prev = {}
+        self._prev_best = {}               # side -> best level of the last snapshot
+        self._depleted = {}                # (side, lv) -> snapshot index it emptied at
+        self._refills = {}                 # (side, lv) -> [count, last snapshot index]
+        self._n = 0
 
-    found = []
-    refills = {}
-    prev = {}
+    def _lv(self, price):
+        return int(round(price / self.tick))
 
-    for s in snaps:
+    def update(self, snap):
+        """Read one snapshot; return the events it produced."""
+        self._n += 1
+        ts = snap["ts"]
+        levels = ((0, snap["bids"]), (1, snap["asks"]))
+        self._sizes.append([sz for _, lvls in levels for _, sz in lvls])
+        sizes = np.array([x for s in self._sizes for x in s], dtype=float)
+        if sizes.size == 0:
+            self._prev, self._prev_best = {}, {}
+            return []
+        # Causal: the threshold never sees a snapshot that has not happened yet.
+        thresh = sizes.mean() + self.wall_sigma * sizes.std()
+
+        found = []
         cur = {}
-        for side, levels in ((0, s["bids"]), (1, s["asks"])):
-            for price, size in levels:
-                lv = int(round(price / tick_size))
+        visible = {}
+        best = {}
+        for side, lvls in levels:
+            idx = [self._lv(p) for p, _ in lvls]
+            if idx:
+                visible[side] = (min(idx), max(idx))
+                best[side] = max(idx) if side == 0 else min(idx)
+            for (price, size), lv in zip(lvls, idx):
                 cur[(side, lv)] = size
                 if size >= thresh:
-                    found.append({"ts": s["ts"], "price": price, "side": side,
+                    found.append({"ts": ts, "price": price, "side": side,
                                   "kind": "wall", "size": int(size)})
 
-        for key, old in prev.items():
-            new = cur.get(key, 0)
+        for key, old in self._prev.items():
             side, lv = key
-            price = lv * tick_size
-            if old >= thresh and new == 0:
-                found.append({"ts": s["ts"], "price": price, "side": side,
-                              "kind": "pulled", "size": int(old)})
-            elif old > 0 and new == 0:
-                refills[key] = refills.get(key, 0)
+            new = cur.get(key, 0)
+            price = round(lv * self.tick, 10)
+            if new == 0:
+                rng = visible.get(side)
+                if rng is None:
+                    continue
+                lo, hi = rng
+                # bids scroll out below the window, asks above it
+                scrolled_out = lv < lo if side == 0 else lv > hi
+                if scrolled_out:
+                    continue
+                # bids above the best bid / asks below the best ask were traded through
+                crossed = lv > hi if side == 0 else lv < lo
+                if old >= thresh and not crossed:
+                    found.append({"ts": ts, "price": price, "side": side,
+                                  "kind": "pulled", "size": int(old)})
+                # Hit empty at the touch, with the touch moving by at most a
+                # tick. A jump of several ticks is the market moving away.
+                if lv == self._prev_best.get(side) and abs(best.get(side, lv) - lv) <= 1:
+                    self._depleted[key] = self._n
             elif new > old * 1.5 and new >= thresh * 0.5:
-                found.append({"ts": s["ts"], "price": price, "side": side,
+                found.append({"ts": ts, "price": price, "side": side,
                               "kind": "stacked", "size": int(new - old)})
 
-        for key in cur:
-            if key in refills and cur[key] > 0:
-                refills[key] += 1
-                if refills[key] == iceberg_refills:
-                    side, lv = key
-                    found.append({"ts": s["ts"], "price": lv * tick_size, "side": side,
-                                  "kind": "iceberg", "size": int(cur[key])})
+        # iceberg: the same level empties and comes back, again and again
+        for key, size in cur.items():
+            if key in self._prev or key not in self._depleted:
+                continue
+            del self._depleted[key]
+            if key[1] != best.get(key[0]):
+                continue                   # came back, but not at the touch
+            rec = self._refills.setdefault(key, [0, self._n])
+            rec[0] += 1
+            rec[1] = self._n
+            if rec[0] == self.iceberg_refills:
+                side, lv = key
+                found.append({"ts": ts, "price": round(lv * self.tick, 10), "side": side,
+                              "kind": "iceberg", "size": int(size)})
 
-        # voids: gaps of more than one tick between consecutive occupied levels
-        for side, levels in ((0, s["bids"]), (1, s["asks"])):
-            lv = sorted(int(round(p / tick_size)) for p, _ in levels)
+        # voids: gaps of more than three ticks between consecutive occupied levels
+        for side, lvls in levels:
+            lv = sorted(self._lv(p) for p, _ in lvls)
             for i in range(1, len(lv)):
                 gap = lv[i] - lv[i - 1]
                 if gap > 3:
-                    found.append({"ts": s["ts"], "price": lv[i - 1] * tick_size,
+                    found.append({"ts": ts, "price": round(lv[i - 1] * self.tick, 10),
                                   "side": side, "kind": "void", "size": int(gap)})
 
-        prev = cur
+        self._prev = cur
+        self._prev_best = best
+        if self._n % 60 == 0:
+            self._forget()
+        return found
 
+    def _forget(self):
+        """Drop refill memory for levels price has long left behind."""
+        cutoff = self._n - self.memory
+        self._depleted = {k: n for k, n in self._depleted.items() if n > cutoff}
+        self._refills = {k: r for k, r in self._refills.items() if r[1] > cutoff}
+
+
+def detect_events(snaps, tick_size, wall_sigma=3.0, iceberg_refills=3):
+    """Batch form of EventDetector over a list of snapshots.
+
+    The wall threshold at each snapshot uses only the snapshots up to it, so a
+    backtest run through here has no look-ahead.
+    """
+    det = EventDetector(tick_size, wall_sigma, iceberg_refills, window=max(len(snaps), 1))
+    found = []
+    for s in snaps:
+        found.extend(det.update(s))
     return found

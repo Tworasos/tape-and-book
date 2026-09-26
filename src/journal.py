@@ -35,6 +35,12 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 # bot's holding time; the long one shows whether a read had lasting value.
 HORIZONS = (30, 120, 300)
 
+# Row format version. Rows without "v" predate de-duplicated observations: a
+# wall could appear three times and a large print stayed in every row for
+# minutes, so their event-feature counts are inflated. Book imbalance, which
+# is read fresh each second, is unaffected.
+VERSION = 2
+
 
 class Journal:
     def __init__(self, symbol, horizons=HORIZONS, flush_every=20):
@@ -59,6 +65,7 @@ class Journal:
             return
         with self.lock:
             self.pending.append({
+                "v": VERSION,
                 "ts": time.time(),
                 "price": float(price),
                 "score": round(float(score), 3),

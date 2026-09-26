@@ -77,7 +77,7 @@ def fetch(symbol, interval="5m", force=False):
         auto_adjust=False,
     )
     if df is None or df.empty:
-        raise RuntimeError(f"Yahoo nie zwrocil danych dla {symbol} ({interval})")
+        raise RuntimeError(f"Yahoo returned no data for {symbol} ({interval})")
 
     if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
         df.columns = df.columns.get_level_values(0)

@@ -109,7 +109,7 @@ function note(ctx, w, h, text) {
 function drawHeat() {
   const { ctx, w, h } = prep($('heat'));
   const d = S.heat;
-  if (!S.showHeat) return note(ctx, w, h, 'heatmap wylaczona');
+  if (!S.showHeat) return note(ctx, w, h, 'heatmap off');
   if (!d || !d.cells || !d.cells.length) return note(ctx, w, h, 'no data');
 
   const nc = d.cols.length, nr = d.rows.length;

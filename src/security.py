@@ -25,7 +25,9 @@ from __future__ import annotations
 import hmac
 import os
 import secrets
+import threading
 import time
+from collections import deque
 from urllib.parse import urlparse
 
 # Only these Host values are served. Anything else is a rebinding attempt.
@@ -113,16 +115,21 @@ class RateLimiter:
         # guard, not a security control - the Host and Origin checks are.
         self.limit = limit
         self.window = window
-        self._hits = []
+        self._hits = deque()
+        # The server is threaded: without the lock, concurrent requests race
+        # on the list and the count drifts.
+        self._lock = threading.Lock()
 
     def allow(self):
         now = time.monotonic()
         cutoff = now - self.window
-        self._hits = [t for t in self._hits if t > cutoff]
-        if len(self._hits) >= self.limit:
-            return False
-        self._hits.append(now)
-        return True
+        with self._lock:
+            while self._hits and self._hits[0] <= cutoff:
+                self._hits.popleft()
+            if len(self._hits) >= self.limit:
+                return False
+            self._hits.append(now)
+            return True
 
 
 def safe_subpath(root, candidate):
